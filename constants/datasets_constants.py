@@ -1,0 +1,7 @@
+DATA_SET_MNIST = "mnist"
+DATA_SET_FMNIST = "fmnist"
+DATA_SET_CIFAR_10 = "cifar10"
+DATA_SET_CIFAR_100 = "cifar100"
+DATA_SET_SVHN = "svhn"
+DATA_SET_STL_10 = "STL10"
+DATA_SET_TINY_IMAGE_NET = "tinyimagenet"
