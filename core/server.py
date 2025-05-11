@@ -14,8 +14,9 @@ from utils.similarities.pairwise_cosine_similarity import pairwise_cosine_simila
 from utils.similarities.pairwise_euclidean_similarity import pairwise_euclidean_similarity
 from validators.config_validator import ConfigValidator
 
+
 class Server(FederatedBase):
-    def __init__(self, model, config: 'ConfigValidator', log: 'Log' ):
+    def __init__(self, model, config: 'ConfigValidator', log: 'Log'):
         super().__init__(model, config, log)
 
         self.model_cache = []
@@ -27,7 +28,7 @@ class Server(FederatedBase):
         if self.distance_metric == DISTANCE_COSINE:
             return pairwise_cosine_similarity(clients, self.config.DISTANCE_METRIC_ON_PARAMETERS, self.log)
         elif self.distance_metric == DISTANCE_COORDINATE:
-            return pairwise_coordinate_similarity(clients, self.config.REMOVE_COMMON_IDS, self.log)
+            return pairwise_coordinate_similarity(clients, self.config.REMOVE_COMMON_IDS, self.config, self.log)
         elif self.distance_metric == DISTANCE_EUCLIDEAN:
             return pairwise_euclidean_similarity(clients, self.config.DISTANCE_METRIC_ON_PARAMETERS, self.log)
         else:

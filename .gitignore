@@ -189,3 +189,6 @@ model_parameters/*
 
 logs/
 logs/*
+
+plots/
+plots/*

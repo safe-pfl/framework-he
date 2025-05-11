@@ -17,7 +17,6 @@ class Client(FederatedBase):
         self.eval_loader = evaluation_data_loader
 
         self.gradients = {}
-
         self.id = id_num
 
         self.log.info(f"client no: {self.id} initialized")
@@ -25,75 +24,65 @@ class Client(FederatedBase):
     def synchronize_with_server(self, server):
         self.model.load_state_dict(server.model.state_dict())
 
+
     def compute_weight_update(
             self,
-            be_ready_for_clustering: bool,
-            epochs: int,
+            be_ready_for_clustering,
+            epochs=None,
             loader=None,
     ):
-        # ---------- 1. local training --------------------------------------------------
+
+        epochs = self.config.NUMBER_OF_EPOCHS if epochs is None else epochs
         _updated_model, train_stats = train(
             self.model,
-            self.train_loader if loader is None else loader,
+            self.train_loader if not loader else loader,
             self.optimizer,
             epochs,
+            self.device,
+            self.log,
         )
+
         self.model.load_state_dict(_updated_model.state_dict())
         del _updated_model
 
         self.log.info(f"training done for client no {self.id} with loss of {train_stats}")
 
-        # ---------- 2. Fisher-diagonal computation (optional) --------------------------
-        if not be_ready_for_clustering:
-            return train_stats
+        if be_ready_for_clustering:
+            criterion = torch.nn.CrossEntropyLoss().to(device=self.device, non_blocking=True)
 
-        # Copy so the main model stays untouched
-        _model = py_copy.deepcopy(self.model).to(self.device)
-        _model.eval()
+            _model = py_copy.deepcopy(self.model)
+            _model.eval()
 
-        # Allocate one tensor per parameter (same shape, same device)
-        fisher_diag = [torch.zeros_like(p, device=self.device) for p in _model.parameters()]
+            accumulated_grads = []
+            for param in _model.parameters():
+                if param.requires_grad:
+                    accumulated_grads.append(torch.zeros_like(param, device=self.device))
+                else:
+                    accumulated_grads.append(None)
 
-        for inputs, targets in self.train_loader:
-            inputs, targets = inputs.to(self.device), targets.to(self.device)
+            for inputs, labels in self.train_loader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
+                outputs = _model(inputs)
+                loss = criterion(outputs, labels.long())
 
-            # log-probabilities for the current batch
-            log_probs = F.log_softmax(_model(inputs), dim=1)
+                grads = torch.autograd.grad(loss, _model.parameters(), allow_unused=True)
 
-            # ---- per-sample score function -------------------------------------------
-            for i, tgt in enumerate(targets):
-                # scalar log-probability of the correct class
-                log_p_correct = log_probs[i, tgt]
+                for i, grad in enumerate(grads):
+                    if grad is not None:
+                        accumulated_grads[i] += grad.detach().abs()
 
-                # gradient of log p(y|x;θ)  w.r.t. θ  (first-order score)
-                _model.zero_grad(set_to_none=True)
-                grads = autograd.grad(
-                    log_p_correct,
-                    _model.parameters(),
-                    create_graph=False,  # we only need first-order grads
-                    retain_graph=False,
-                )
-                # accumulate squared gradients
-                for fd, g in zip(fisher_diag, grads):
-                    fd.add_(g.detach() ** 2)
+            all_grads = []
+            for grad in accumulated_grads:
+                if grad is not None:
+                    all_grads.append(grad.view(-1).cpu())
 
-        # ---- 3. expectation over the dataset -----------------------------------------
-        num_samples = len(self.train_loader.dataset)
-        fisher_diag = [fd / num_samples for fd in fisher_diag]
+            if all_grads:
+                combined_grads = torch.cat(all_grads).numpy()
+                self.gradients = {i: val for i, val in enumerate(combined_grads)}
+                self.log.info(f"Gradients computed with {len(self.gradients)} entries.")
+            else:
+                self.log.warn("No gradients were computed.")
+                self.gradients = {}
 
-        # ---- 4. layer-wise min-max normalisation -------------------------------------
-        eps = 1e-12  # avoids division by zero
-        norm_fisher_diag = []
-        for fd in fisher_diag:
-            x_min, x_max = fd.min(), fd.max()
-            norm_fisher_diag.append((fd - x_min) / (x_max - x_min + eps))
-
-        # keep a flat copy that matches your previous self.gradients structure
-        flat = torch.cat([fd.view(-1).cpu() for fd in norm_fisher_diag]).numpy()
-        self.gradients = {i: v for i, v in enumerate(flat)}
-        self.log.info(f"Fisher diagonal computed with {len(self.gradients)} entries.")
-
-        del _model, fisher_diag, norm_fisher_diag  # free memory
-        torch.cuda.empty_cache()
-
+            del _model
         return train_stats

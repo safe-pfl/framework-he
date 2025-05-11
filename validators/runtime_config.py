@@ -9,10 +9,6 @@ class RuntimeConfig:
 
     clients_id_list: List[str] | List[int]
 
-    # runtime datasets
-    train_loaders: List[DataLoader]
-    test_loaders: List[DataLoader]
-
     # TODO: HE related runtime configurations
 
     # application Log instance

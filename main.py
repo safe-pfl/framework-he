@@ -1,6 +1,10 @@
 import numpy as np
 import torch
+
+from constants import distances_constants
 from core.client import Client
+from core.clustering.data import cluster_clients, compute_similarity_matrix, calculate_label_distribution
+from core.sensitivity_percentage.find_optimal_pruning_rate import calculate_optimal_sensitivity_percentage
 from core.server import Server
 from data.data_driven_clustering import compute_data_driven_clustering
 from data.load_and_prepare_data import load_and_prepare_data
@@ -23,7 +27,7 @@ def main(config_yaml_path: str = "./config.yaml"):
 
     config_dict = load_objectified_yaml(config_yaml_path)
 
-    config_dict = config_dict | {'desired_distribution': None} # TODO: update
+    config_dict = config_dict | {'desired_distribution': None}  # TODO: update
 
     config = ConfigValidator(**config_dict)
 
@@ -43,7 +47,6 @@ def main(config_yaml_path: str = "./config.yaml"):
     # table_data = [[key, value] for key, value in config.items()] # TODO: fix items function in config validator
     # log.info(tabulate(table_data, headers=["Config Key", "Value"], tablefmt="grid"))
 
-
     log.info("----------    framework   setup   --------------------------------------------------")
     FrameworkSetup.path_setup(config)
 
@@ -54,19 +57,26 @@ def main(config_yaml_path: str = "./config.yaml"):
         log.info("clients train loader label distribution")
         config = config | {"DATA_DRIVEN_CLUSTERING": compute_data_driven_clustering(train_loaders, config, log)}
 
+    log.info("----------    data    distribution   --------------------------------------------------")
 
+    if config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING:
+        train_label_distributions = [calculate_label_distribution(loader, "train", config, log) for loader in train_loaders]
+        train_similarity_matrix = compute_similarity_matrix(train_label_distributions)
+        OPTIMAL_TRAIN_CLUSTERING = cluster_clients(train_similarity_matrix)
+
+    else:
+        OPTIMAL_TRAIN_CLUSTERING = []
     log.info("----------    runtime configurations  --------------------------------------------------")
     clients_id_list = client_ids_list_generator(config.NUMBER_OF_CLIENTS, log=log)
 
     config.RUNTIME_COMFIG = RuntimeConfig(
         clients_id_list=clients_id_list,
-        # train_loaders=train_loaders,
-        # test_loaders=test_loaders,
         log=log
     )
 
     log.info("----------    model initialization --------------------------------------------------")
-    initial_model = network_factory(model_type=config.MODEL_TYPE, number_of_classes=config.NUMBER_OF_CLASSES, pretrained=True)
+    initial_model = network_factory(model_type=config.MODEL_TYPE, number_of_classes=config.NUMBER_OF_CLASSES,
+                                    pretrained=config.PRETRAINED_MODELS)
 
     log.info("----------    client initialization --------------------------------------------------")
 
@@ -88,10 +98,8 @@ def main(config_yaml_path: str = "./config.yaml"):
         for i in client_list
     ]
 
-
     log.info("----------    server initialization --------------------------------------------------")
     server = Server(initial_model, config, log)
-
 
     log.info("----------    Federated Learning initialization --------------------------------------------------")
     cfl_stats = ExperimentLogger()
@@ -109,20 +117,18 @@ def main(config_yaml_path: str = "./config.yaml"):
             Checking clustering conditions
         """
         TRIGGER_CLUSTERING = (
-                not SAFE_PFL_CONFIG["FED_AVG"]
+                not config.FED_AVG
                 and not STOP_CLUSTERING
-                and not SAFE_PFL_CONFIG["PRE_COMPUTED_OPTIMAL_CLUSTERING"]
-                and c_round % SAFE_PFL_CONFIG["CLUSTERING_PERIOD"] == 0
-                or SAFE_PFL_CONFIG["CLUSTER_AT_FIRST"]
+                and not config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING
+                and c_round % config.CLUSTERING_PERIOD == 0
         )
-        SAFE_PFL_CONFIG["CLUSTER_AT_FIRST"] = False
         """
             Participating clients training loop
         """
         for index, client in enumerate(clients):
             client.compute_weight_update(
                 be_ready_for_clustering=TRIGGER_CLUSTERING,
-                epochs=SAFE_PFL_CONFIG["ROUND_EPOCHS"],
+                epochs=config.NUMBER_OF_EPOCHS,
             )
 
         """
@@ -130,17 +136,13 @@ def main(config_yaml_path: str = "./config.yaml"):
         """
         if (
                 c_round == 1
-                and SAFE_PFL_CONFIG["DISTANCE_METRIC"]
+                and config.DISTANCE_METRIC
                 == distances_constants.DISTANCE_COORDINATE
-                and SAFE_PFL_CONFIG["DYNAMIC_SENSITIVITY_PERCENTAGE"]
+                and config.DYNAMIC_SENSITIVITY_PERCENTAGE
         ):
-            SAFE_PFL_CONFIG.update(
-                {
-                    "SENSITIVITY_PERCENTAGE": calculate_optimal_sensitivity_percentage(
-                        clients[0].model
-                    )
-                }
-            )
+
+            config.SENSITIVITY_PERCENTAGE = calculate_optimal_sensitivity_percentage(clients[0].model, config, log)
+
             log.info(
                 f'done calculating optimal sensitivity percentage with value of {config.SENSITIVITY_PERCENTAGE}'
             )
@@ -179,7 +181,7 @@ def main(config_yaml_path: str = "./config.yaml"):
                 for client in clients:
                     torch.save(
                         client.model.state_dict(),
-                        MODEL_SAVING_PATH + f"client_{client.id}_model.pt",
+                        config. MODEL_SAVING_PATH + f"client_{client.id}_model.pt",
                     )
 
         client_clusters = []
@@ -190,7 +192,6 @@ def main(config_yaml_path: str = "./config.yaml"):
             client_clusters.append(new_orientation)
         global_clients_clustered = client_clusters
 
-
         server.aggregate_clusterwise(global_clients_clustered)
 
         acc_clients = [client.evaluate() for client in clients]
@@ -200,10 +201,7 @@ def main(config_yaml_path: str = "./config.yaml"):
             log.info(
                 f'checking whether to stop clustering or not with STOP_AVG_ACCURACY value of {config.STOP_AVG_ACCURACY} and averaged accuracy of {acc_mean}'
             )
-            if acc_mean >= config.STOP_AVG_ACCURACY and (
-                    np.array_equal(CLUSTERING_LABELS, OPTIMAL_TRAIN_CLUSTERING)
-                    or np.array_equal(CLUSTERING_LABELS, OPTIMAL_TEST_CLUSTERING)
-            ):
+            if acc_mean >= config.STOP_AVG_ACCURACY and np.array_equal(CLUSTERING_LABELS, OPTIMAL_TRAIN_CLUSTERING):
                 log.info(f"clustering stop triggered at round {c_round}")
                 STOP_CLUSTERING = True
 
@@ -225,4 +223,3 @@ def main(config_yaml_path: str = "./config.yaml"):
 
 if __name__ == "__main__":
     typer.run(main)
-

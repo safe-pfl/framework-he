@@ -1,4 +1,4 @@
-from evaluation import model_evaluation
+from core.evaluation import model_evaluation
 from utils.checker import device_checker
 from utils.log import Log
 from validators.config_validator import ConfigValidator
@@ -17,7 +17,7 @@ class FederatedBase(object):
         self.model = model.to(self.device)
 
     def evaluate(self):
-        _loss, _accuracy = model_evaluation(self.model, self.eval_loader)
+        _loss, _accuracy = model_evaluation(self.model, self.eval_loader, self.device)
 
         if _loss < 1.0 and _accuracy > 0.6:
             self.log.info(
@@ -31,3 +31,5 @@ class FederatedBase(object):
             self.log.warn(
                 f"testing done for client no {self.id} with accuracy of {_accuracy} and loss of {_loss} [POOR]"
             )
+
+        return _accuracy
