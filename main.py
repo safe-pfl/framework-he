@@ -44,6 +44,8 @@ def main(config_yaml_path: str = "./config.yaml"):
         remove_common_ids=config.REMOVE_COMMON_IDS,
     ), config.MODEL_TYPE, config.DISTANCE_METRIC)
 
+    MODEL_SAVING_PATH = f'models/{config.MODEL_TYPE}/{config.DISTANCE_METRIC}/'
+
     # table_data = [[key, value] for key, value in config.items()] # TODO: fix items function in config validator
     # log.info(tabulate(table_data, headers=["Config Key", "Value"], tablefmt="grid"))
 
@@ -181,7 +183,7 @@ def main(config_yaml_path: str = "./config.yaml"):
                 for client in clients:
                     torch.save(
                         client.model.state_dict(),
-                        config. MODEL_SAVING_PATH + f"client_{client.id}_model.pt",
+                        MODEL_SAVING_PATH + f"client_{client.id}_model.pt",
                     )
 
         client_clusters = []
