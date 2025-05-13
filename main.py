@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import math
 
 from constants import distances_constants
 from core.client import Client
@@ -11,6 +12,7 @@ from data.load_and_prepare_data import load_and_prepare_data
 from nets.network_factory import network_factory
 from utils.check_train_test_class_mismatch import check_train_test_class_mismatch
 from utils.client_ids_list import client_ids_list_generator
+from utils.count_parameters import count_parameters
 from utils.display_stats import display_stats, ExperimentLogger
 from utils.framework_setup import FrameworkSetup
 from utils.log import Log
@@ -81,6 +83,17 @@ def main(config_yaml_path: str = "./config.yaml"):
     log.info("----------    model initialization --------------------------------------------------")
     initial_model = network_factory(model_type=config.MODEL_TYPE, number_of_classes=config.NUMBER_OF_CLASSES,
                                     pretrained=config.PRETRAINED_MODELS)
+
+
+
+    log.info("----------    Homomorphic initialization --------------------------------------------------")
+    log.info("----------    RLEW setting    --------------------------------------------------")
+    WEIGHT_DECIMALS = 8
+
+    # find closest 2^x larger than number of weights
+    num_weights = count_parameters(initial_model, config.MODEL_TYPE, log)
+    n = 2 ** math.ceil(math.log2(num_weights))
+    log.info(f'the vlue for RLWE `n` is: {n}')
 
     log.info("----------    client initialization --------------------------------------------------")
 

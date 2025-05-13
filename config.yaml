@@ -42,4 +42,3 @@ federated_learning_rounds: 10
 stop_avg_accuracy: 1.0
 save_before_aggregation_models: false
 save_global_models: false
-
