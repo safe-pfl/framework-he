@@ -15,3 +15,6 @@ SERVER_ID: str = "server"
 MODEL_UPDATE: str = "model_update"
 
 MESSAGE_BODY_STATES = "state"
+
+# Encryption Methods
+ENCRYPTION_HOMOMORPHIC_XMKCKKS = "he_xmkckks"

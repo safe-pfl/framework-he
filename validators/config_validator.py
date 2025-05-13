@@ -12,6 +12,7 @@ from constants.distances_constants import (
 )
 from constants.federated_learning_schema_constants import TRADITIONAL_FEDERATED_LEARNING, CLUSTER_FEDERATED_LEARNING, \
     DECENTRALIZED_FEDERATED_LEARNING
+from constants.framework import ENCRYPTION_HOMOMORPHIC_XMKCKKS
 
 from constants.models_constants import (
     MODEL_CNN,
@@ -85,6 +86,8 @@ class ConfigValidator:
             aggregation_strategy: str = None,
             aggregation_sample_scaling: bool = False,
             federation_id: str = "",
+            encryption_method: str = None,
+            xmkckks_weight_decimals: int = None,
 
     ):
 
@@ -133,6 +136,9 @@ class ConfigValidator:
         self.AGGREGATION_SAMPLE_SCALING = aggregation_sample_scaling
         self.FEDERATION_ID = federation_id
 
+        self.ENCRYPTION_METHOD = self._encryption_method(encryption_method)
+        self.XMKCKKS_WEIGHT_DECIMALS = xmkckks_weight_decimals
+
     # def items(self):
     #
     # TODO: sync with class filed items
@@ -176,7 +182,7 @@ class ConfigValidator:
         return self._RUNTIME_COMFIG
 
     @RUNTIME_COMFIG.setter
-    def RUNTIME_COMFIG(self, runtime_config: RuntimeConfig ) -> None:
+    def RUNTIME_COMFIG(self, runtime_config: RuntimeConfig) -> None:
         self._RUNTIME_COMFIG: RuntimeConfig = runtime_config
 
     def _validate_model_type(self, model_type: str) -> str:
@@ -381,7 +387,6 @@ class ConfigValidator:
             raise TypeError(f"unknown federated_learning_schema type: {federated_learning_schema}")
         return federated_learning_schema
 
-
     def _client_role(self, client_role: str):
         if client_role not in [
             TRAIN,
@@ -395,7 +400,6 @@ class ConfigValidator:
             raise TypeError(f"unknown client_role type: {client_role}")
         return client_role
 
-
     def _aggregation_strategy(self, aggregation_strategy: str | None) -> str:
         if aggregation_strategy not in [
             AGGREGATION_STRATEGY_FED_AVG,
@@ -403,3 +407,10 @@ class ConfigValidator:
         ]:
             raise TypeError(f"unknown aggregation_strategy type: {aggregation_strategy}")
         return aggregation_strategy
+
+    def _encryption_method(self, encryption_method: str):
+        if encryption_method not in [
+            ENCRYPTION_HOMOMORPHIC_XMKCKKS,
+        ]:
+            raise TypeError(f"unknown encryption_method type: {encryption_method}")
+        return encryption_method

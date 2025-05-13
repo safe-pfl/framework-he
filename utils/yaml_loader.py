@@ -54,6 +54,11 @@ def load_objectified_yaml(yaml_path: str):
         'aggregation_sample_scaling': getattr(yaml_obj, 'aggregation_sample_scaling', False),
         'federation_id': getattr(yaml_obj, 'federation_id', ""),
         'learning_rate': getattr(yaml_obj, 'learning_rate', "0.001"),
+
+
+        'encryption_method': getattr(yaml_obj, 'encryption_method', None),
+        'xmkckks_weight_decimals': getattr(yaml_obj, 'xmkckks_weight_decimals', "8"),
+
     }
 
     return config_dict

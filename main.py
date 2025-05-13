@@ -1,10 +1,13 @@
 import numpy as np
 import torch
 import math
+from xmkckks import RLWE
 
 from constants import distances_constants
+from constants.framework import ENCRYPTION_HOMOMORPHIC_XMKCKKS
 from core.client import Client
 from core.clustering.data import cluster_clients, compute_similarity_matrix, calculate_label_distribution
+from core.encryption.homomorphic import rlwe_generator
 from core.sensitivity_percentage.find_optimal_pruning_rate import calculate_optimal_sensitivity_percentage
 from core.server import Server
 from data.data_driven_clustering import compute_data_driven_clustering
@@ -14,6 +17,7 @@ from utils.check_train_test_class_mismatch import check_train_test_class_mismatc
 from utils.client_ids_list import client_ids_list_generator
 from utils.count_parameters import count_parameters
 from utils.display_stats import display_stats, ExperimentLogger
+from utils.encryption.next_prime import next_prime
 from utils.framework_setup import FrameworkSetup
 from utils.log import Log
 from utils.log_path import log_path
@@ -72,28 +76,30 @@ def main(config_yaml_path: str = "./config.yaml"):
 
     else:
         OPTIMAL_TRAIN_CLUSTERING = []
+
+
     log.info("----------    runtime configurations  --------------------------------------------------")
     clients_id_list = client_ids_list_generator(config.NUMBER_OF_CLIENTS, log=log)
 
     config.RUNTIME_COMFIG = RuntimeConfig(
         clients_id_list=clients_id_list,
+        rlwe=None,
         log=log
     )
+
 
     log.info("----------    model initialization --------------------------------------------------")
     initial_model = network_factory(model_type=config.MODEL_TYPE, number_of_classes=config.NUMBER_OF_CLASSES,
                                     pretrained=config.PRETRAINED_MODELS)
 
-
-
-    log.info("----------    Homomorphic initialization --------------------------------------------------")
-    log.info("----------    RLEW setting    --------------------------------------------------")
-    WEIGHT_DECIMALS = 8
-
-    # find closest 2^x larger than number of weights
-    num_weights = count_parameters(initial_model, config.MODEL_TYPE, log)
-    n = 2 ** math.ceil(math.log2(num_weights))
-    log.info(f'the vlue for RLWE `n` is: {n}')
+    if config.ENCRYPTION_METHOD is not None:
+        log.info("----------    encryption initialization --------------------------------------------------")
+        if config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
+            config.RUNTIME_COMFIG = RuntimeConfig(
+                clients_id_list=clients_id_list,
+                rlwe=rlwe_generator(model=initial_model,config=config, log=log),
+                log=log
+            )
 
     log.info("----------    client initialization --------------------------------------------------")
 

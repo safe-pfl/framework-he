@@ -42,3 +42,8 @@ federated_learning_rounds: 10
 stop_avg_accuracy: 1.0
 save_before_aggregation_models: false
 save_global_models: false
+
+# Encryption
+# none | he_xmkckks | TODO: other encryption methods
+encryption_method: "he_xmkckks"
+xmkckks_weight_decimals: 8
