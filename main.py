@@ -9,6 +9,7 @@ from core.server import Server
 from data.data_driven_clustering import compute_data_driven_clustering
 from data.load_and_prepare_data import load_and_prepare_data
 from nets.network_factory import network_factory
+from utils.check_train_test_class_mismatch import check_train_test_class_mismatch
 from utils.client_ids_list import client_ids_list_generator
 from utils.display_stats import display_stats, ExperimentLogger
 from utils.framework_setup import FrameworkSetup
@@ -62,7 +63,8 @@ def main(config_yaml_path: str = "./config.yaml"):
     log.info("----------    data    distribution   --------------------------------------------------")
 
     if config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING:
-        train_label_distributions = [calculate_label_distribution(loader, "train", config, log) for loader in train_loaders]
+        train_label_distributions = [calculate_label_distribution(loader, "train", config, log) for loader in
+                                     train_loaders]
         train_similarity_matrix = compute_similarity_matrix(train_label_distributions)
         OPTIMAL_TRAIN_CLUSTERING = cluster_clients(train_similarity_matrix)
 
@@ -89,7 +91,7 @@ def main(config_yaml_path: str = "./config.yaml"):
         Client(
             initial_model,
             lambda x: torch.optim.SGD(
-                x, lr=0.001, momentum=0.9, weight_decay=1e-4
+                x, lr=config.LEARNING_RATE, momentum=0.9, weight_decay=1e-4
             ),
             i,
             train_loaders[i],
@@ -142,7 +144,6 @@ def main(config_yaml_path: str = "./config.yaml"):
                 == distances_constants.DISTANCE_COORDINATE
                 and config.DYNAMIC_SENSITIVITY_PERCENTAGE
         ):
-
             config.SENSITIVITY_PERCENTAGE = calculate_optimal_sensitivity_percentage(clients[0].model, config, log)
 
             log.info(
