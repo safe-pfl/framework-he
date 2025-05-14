@@ -1,11 +1,12 @@
-from constants.framework import GLOBAL_MODELS_SAVING_PATH
+from constants.framework import GLOBAL_MODELS_SAVING_PATH, ENCRYPTION_HOMOMORPHIC_XMKCKKS
 from constants.distances_constants import *
 import pandas as pd
 from sklearn.cluster import AffinityPropagation
 import torch
 import copy as py_copy
 import os
-
+from xmkckks import Rq
+from typing import List
 from core.federated_base import FederatedBase
 from utils.log import Log
 
@@ -21,6 +22,18 @@ class Server(FederatedBase):
 
         self.model_cache = []
         self.distance_metric = self.config.DISTANCE_METRIC
+
+        self.rlwe_vector_a_poly: Rq = self._generate_rlwe_vector()
+        self.rlwe_vector_a_list: List[int] = self._get_vector_a_list()
+
+    def _generate_rlwe_vector(self):
+        if self.config.ENCRYPTION_METHOD is not None and self.config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
+            self.log.info('generating RLWE vector')
+            self.config.RUNTIME_COMFIG.rlwe.generate_vector_a()
+            return self.config.RUNTIME_COMFIG.rlwe.get_vector_a()
+        else:
+            self.log.info('passing generating RLWE vector')
+            return None
 
     def compute_pairwise_similarities(self, clients):
         self.log.info(f"Start compute pairwise similarities with metric: {self.distance_metric}")
@@ -94,3 +107,6 @@ class Server(FederatedBase):
                 # client.optimizer = torch.optim.Adam(client.model.parameters(), lr=0.001,  amsgrad=True)
                 # client.optimizer = torch.optim.SGD(client.model.parameters(),lr=0.001, momentum=0.9, weight_decay=1e-4)
                 # client.optimizer = torch.optim.SGD(client.model.parameters(),lr=0.001, momentum=0.9)
+
+    def _get_vector_a_list(self) -> List[int]:
+        return self.rlwe_vector_a_poly.poly_to_list()

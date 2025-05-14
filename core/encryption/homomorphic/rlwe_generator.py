@@ -1,5 +1,6 @@
 from xmkckks import RLWE
 
+from constants.framework import GAUSSIAN_DISTRIBUTION
 from utils.count_parameters import count_parameters
 from utils.encryption.next_prime import next_prime
 from utils.log import Log
@@ -26,7 +27,8 @@ def rlwe_generator(model, config: ConfigValidator, log: Log) -> RLWE:
     q = next_prime(t * 50)  # *50 = 100_000_000_567
     log.info(f'the vlue for RLWE `q` is: {q}')
 
-    std = 3  # standard deviation of Gaussian distribution
+    # standard deviation of Gaussian distribution
+    std = GAUSSIAN_DISTRIBUTION
 
     return RLWE(n, q, t, std)
 

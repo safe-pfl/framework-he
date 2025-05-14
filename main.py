@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import math
 from xmkckks import RLWE
+from xmkckks.rlwe import discrete_uniform
 
 from constants import distances_constants
 from constants.framework import ENCRYPTION_HOMOMORPHIC_XMKCKKS
@@ -101,6 +102,7 @@ def main(config_yaml_path: str = "./config.yaml"):
                 log=log
             )
 
+
     log.info("----------    client initialization --------------------------------------------------")
 
     client_list = [i for i in range(config.NUMBER_OF_CLIENTS)]
@@ -123,6 +125,27 @@ def main(config_yaml_path: str = "./config.yaml"):
 
     log.info("----------    server initialization --------------------------------------------------")
     server = Server(initial_model, config, log)
+
+
+    if config.ENCRYPTION_METHOD is not None and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
+        log.info("----------    generating sever vector a   --------------------------------------------------")
+        if server.rlwe_vector_a_poly is None:
+            log.info('the sever rlwe vector a must be already generated but here is None!')
+
+        log.info("----------    aggregating public keys    --------------------------------------------------")
+        aggregated_public_key = None
+        for client in clients:
+            if client.id == 0:
+                aggregated_public_key = client.generate_pubkey(vector_a=server.rlwe_vector_a_list)
+            else:
+                aggregated_public_key += client.generate_pubkey(vector_a=server.rlwe_vector_a_list)
+
+        log.info("----------    storing aggregated public key   --------------------------------------------------")
+        for client in clients:
+            _stored_aggregated_key = client.store_aggregated_pubkey(aggregated_public_key)
+            assert _stored_aggregated_key == True
+
+
 
     log.info("----------    Federated Learning initialization --------------------------------------------------")
     cfl_stats = ExperimentLogger()
