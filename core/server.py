@@ -1,4 +1,9 @@
-from constants.framework import GLOBAL_MODELS_SAVING_PATH, ENCRYPTION_HOMOMORPHIC_XMKCKKS
+from copy import deepcopy
+
+import numpy as np
+from xmkckks.rlwe import discrete_gaussian
+
+from constants.framework import GLOBAL_MODELS_SAVING_PATH, ENCRYPTION_HOMOMORPHIC_XMKCKKS, GAUSSIAN_DISTRIBUTION
 from constants.distances_constants import *
 import pandas as pd
 from sklearn.cluster import AffinityPropagation
@@ -23,6 +28,8 @@ class Server(FederatedBase):
         self.model_cache = []
         self.distance_metric = self.config.DISTANCE_METRIC
 
+
+        self.rlwe = deepcopy(self.config.RUNTIME_COMFIG.rlwe)
         self.rlwe_vector_a_poly: Rq = self._generate_rlwe_vector()
         self.rlwe_vector_a_list: List[int] = self._get_vector_a_list()
 
@@ -64,23 +71,82 @@ class Server(FederatedBase):
 
         return clustering
 
-    def aggregate(self, models):
+    def aggregate(self, models, use_encryption: bool =False):
         self.log.info(f"models to be aggregated count: {len(models)}")
 
         device = next(models[0].parameters()).device
-        for model in models:
-            model.to(device)
-        avg_model = py_copy.deepcopy(models[0])
 
-        with torch.no_grad():
-            for param_name, param in avg_model.named_parameters():
-                param.data.zero_()
-                for model in models:
-                    param.data.add_(model.state_dict()[param_name].data / len(models))
+        if use_encryption:
 
-        return avg_model
+            # Generate keys for each client (assuming each model comes from a client)
+            client_keys = [self.rlwe.generate_keys() for _ in range(len(models))]
+            public_keys = [pub for (_, pub) in client_keys]
 
-    def aggregate_clusterwise(self, client_clusters):
+            # Create shared public key
+            allpub0 = sum([pub[0] for pub in public_keys])
+            allpub1 = public_keys[0][1]  # Using the first client's b value
+            allpub = (allpub0, allpub1)
+
+            # Encrypt each model's parameters
+            encrypted_models = []
+            for model in models:
+                model.to(device)
+                flat_params = []
+                for param in model.parameters():
+                    flat_params.extend(param.data.view(-1).tolist())
+
+                m = Rq(np.array(flat_params), self.rlwe.t)
+                encrypted = self.rlwe.encrypt(m, allpub)
+                encrypted_models.append(encrypted)
+
+            # Aggregate encrypted models
+            csum0 = sum([enc[0] for enc in encrypted_models])
+            csum1 = sum([enc[1] for enc in encrypted_models])
+            csum = (csum0, csum1)
+
+            # Partial decryption from each client
+            partial_decryptions = []
+            for i, (sec, _) in enumerate(client_keys):
+                e_star = discrete_gaussian(self.rlwe.n, self.config.RUNTIME_COMFIG.q, GAUSSIAN_DISTRIBUTION+2)  # larger variance
+                partial_dec = self.rlwe.decrypt(csum1, sec, e_star)
+                partial_decryptions.append(partial_dec)
+
+            # Final decryption
+            dec_sum = csum0 + sum(partial_decryptions)
+            dec_sum = Rq(dec_sum.poly.coeffs, self.rlwe.t)
+
+            # Reconstruct the averaged model
+            avg_model = py_copy.deepcopy(models[0])
+            decrypted_params = list(dec_sum.poly.coeffs)
+
+            # Scale by number of models (averaging)
+            decrypted_params = [x * 1/len(models) for x in decrypted_params]
+
+            # Assign decrypted and averaged parameters back to the model
+            pointer = 0
+            with torch.no_grad():
+                for param in avg_model.parameters():
+                    param_size = param.numel()
+                    param_data = decrypted_params[pointer:pointer + param_size]
+                    param.data = torch.tensor(param_data, device=device).reshape(param.shape)
+                    pointer += param_size
+
+            return avg_model
+
+        else:
+            # Original non-encrypted aggregation
+            for model in models:
+                model.to(device)
+            avg_model = py_copy.deepcopy(models[0])
+
+            with torch.no_grad():
+                for param_name, param in avg_model.named_parameters():
+                    param.data.zero_()
+                    for model in models:
+                        param.data.add_(model.state_dict()[param_name].data / len(models))
+
+            return avg_model
+    def aggregate_clusterwise(self, client_clusters, use_encryption):
 
         for cluster_idx, cluster in enumerate(client_clusters):
             if len(cluster) == 1:
@@ -91,7 +157,7 @@ class Server(FederatedBase):
 
             cluster_models = [client.model for client in cluster]
 
-            avg_model = self.aggregate(cluster_models)
+            avg_model = self.aggregate(models=cluster_models, use_encryption=use_encryption)
 
             if self.config.SAVE_GLOBAL_MODELS:
                 _path = f'{GLOBAL_MODELS_SAVING_PATH}/{self.config.MODEL_TYPE}'

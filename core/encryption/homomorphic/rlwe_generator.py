@@ -27,6 +27,9 @@ def rlwe_generator(model, config: ConfigValidator, log: Log) -> RLWE:
     q = next_prime(t * 50)  # *50 = 100_000_000_567
     log.info(f'the vlue for RLWE `q` is: {q}')
 
+    config.RUNTIME_COMFIG.q = q
+
+
     # standard deviation of Gaussian distribution
     std = GAUSSIAN_DISTRIBUTION
 

@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 from typing import List
 
+from numpy import number
 from xmkckks import RLWE
-
 from utils.log import Log
-from torch.utils.data import DataLoader
 
 
 @dataclass
@@ -14,6 +13,7 @@ class RuntimeConfig:
 
     # TODO: HE related runtime configurations
     rlwe: RLWE
+    q: int
 
     # application Log instance
     log: Log

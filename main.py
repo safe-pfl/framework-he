@@ -16,6 +16,7 @@ from data.load_and_prepare_data import load_and_prepare_data
 from nets.network_factory import network_factory
 from utils.check_train_test_class_mismatch import check_train_test_class_mismatch
 from utils.client_ids_list import client_ids_list_generator
+from utils.clustering.update_cluster import update_clusters_based_on_indexes
 from utils.count_parameters import count_parameters
 from utils.display_stats import display_stats, ExperimentLogger
 from utils.encryption.next_prime import next_prime
@@ -28,7 +29,6 @@ from utils.checker import none_checker
 import typer
 from validators.config_validator import ConfigValidator
 from validators.runtime_config import RuntimeConfig
-
 
 def main(config_yaml_path: str = "./config.yaml"):
     config_yaml_path = none_checker(config_yaml_path, var_name(config_yaml_path))
@@ -57,17 +57,17 @@ def main(config_yaml_path: str = "./config.yaml"):
     # table_data = [[key, value] for key, value in config.items()] # TODO: fix items function in config validator
     # log.info(tabulate(table_data, headers=["Config Key", "Value"], tablefmt="grid"))
 
-    log.info("----------    framework   setup   --------------------------------------------------")
+    log.info("----------    framework setup   --------------------------------------------------")
     FrameworkSetup.path_setup(config)
 
-    log.info("----------    data    distribution   --------------------------------------------------")
+    log.info("----------    data distribution   --------------------------------------------------")
     train_loaders, test_loaders = load_and_prepare_data(config, log)
 
     if config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING:
         log.info("clients train loader label distribution")
         config = config | {"DATA_DRIVEN_CLUSTERING": compute_data_driven_clustering(train_loaders, config, log)}
 
-    log.info("----------    data    distribution   --------------------------------------------------")
+    log.info("----------    data driven clustering   --------------------------------------------------")
 
     if config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING:
         train_label_distributions = [calculate_label_distribution(loader, "train", config, log) for loader in
@@ -85,6 +85,7 @@ def main(config_yaml_path: str = "./config.yaml"):
     config.RUNTIME_COMFIG = RuntimeConfig(
         clients_id_list=clients_id_list,
         rlwe=None,
+        q=None,
         log=log
     )
 
@@ -96,11 +97,8 @@ def main(config_yaml_path: str = "./config.yaml"):
     if config.ENCRYPTION_METHOD is not None:
         log.info("----------    encryption initialization --------------------------------------------------")
         if config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
-            config.RUNTIME_COMFIG = RuntimeConfig(
-                clients_id_list=clients_id_list,
-                rlwe=rlwe_generator(model=initial_model,config=config, log=log),
-                log=log
-            )
+            config.RUNTIME_COMFIG.rlwe = rlwe_generator(model=initial_model,config=config, log=log),
+
 
 
     log.info("----------    client initialization --------------------------------------------------")
@@ -150,7 +148,7 @@ def main(config_yaml_path: str = "./config.yaml"):
     log.info("----------    Federated Learning initialization --------------------------------------------------")
     cfl_stats = ExperimentLogger()
     cluster_indices = [np.arange(len(clients)).astype("int")]
-    global_clients_clustered = []
+    client_clusters = []
     CLUSTERING_LABELS = None
     STOP_CLUSTERING: bool = False
 
@@ -177,6 +175,7 @@ def main(config_yaml_path: str = "./config.yaml"):
                 epochs=config.NUMBER_OF_EPOCHS,
             )
 
+
         """
             Calculating the optimal sensitivity value (P)
         """
@@ -191,6 +190,8 @@ def main(config_yaml_path: str = "./config.yaml"):
             log.info(
                 f'done calculating optimal sensitivity percentage with value of {config.SENSITIVITY_PERCENTAGE}'
             )
+
+
 
         if TRIGGER_CLUSTERING:
             full_similarities = server.compute_pairwise_similarities(clients=clients)
@@ -208,6 +209,9 @@ def main(config_yaml_path: str = "./config.yaml"):
             for label in np.unique(clustering.labels_):
                 cluster_indices.append(np.where(clustering.labels_ == label)[0].tolist())
 
+            client_clusters = update_clusters_based_on_indexes(clients=clients, cluster_indices=cluster_indices)
+
+
         elif (
                 c_round % config.CLUSTERING_PERIOD == 0
                 and config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING
@@ -222,6 +226,8 @@ def main(config_yaml_path: str = "./config.yaml"):
                 f"clustering based on optimal clustering {cluster_indices} @ round number {c_round}"
             )
 
+            client_clusters = update_clusters_based_on_indexes(clients=clients, cluster_indices=cluster_indices)
+
             if config.SAVE_BEFORE_AGGREGATION_MODELS:
                 for client in clients:
                     torch.save(
@@ -229,15 +235,12 @@ def main(config_yaml_path: str = "./config.yaml"):
                         MODEL_SAVING_PATH + f"client_{client.id}_model.pt",
                     )
 
-        client_clusters = []
-        for cluster in cluster_indices:
-            new_orientation = []
-            for index in cluster:
-                new_orientation.append(clients[index])
-            client_clusters.append(new_orientation)
-        global_clients_clustered = client_clusters
 
-        server.aggregate_clusterwise(global_clients_clustered)
+
+        log.info(f'triggering aggregation based on these indexes {cluster_indices}')
+        server.aggregate_clusterwise(
+            client_clusters=client_clusters,
+            use_encryption=config.ENCRYPTION_METHOD is not None and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS)
 
         acc_clients = [client.evaluate() for client in clients]
 

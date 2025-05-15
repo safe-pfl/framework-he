@@ -49,7 +49,7 @@ class Client(FederatedBase):
     def store_aggregated_pubkey(self, aggregated_public_key: List[int]) -> bool:
         aggregated_pubkey = self.rlwe.list_to_poly(aggregated_public_key, "q")
         self.aggregated_public_key = (aggregated_pubkey, self.rlwe.get_vector_a())
-        print(f"client id: {self.id} aggregated_public_key: {self.aggregated_public_key}")
+        self.log.info(f"client id: {self.id} aggregated_public_key: {self.aggregated_public_key}")
         return True
 
     # Step 3) After round, encrypt flat list of parameters into two lists (c0, c1)
@@ -63,14 +63,14 @@ class Client(FederatedBase):
         self.log.info(f"Client new plaintext: {flattened_weights[925:935]}")
 
         # Turn list into polynomial
-        poly_weights = Rq(np.array(flattened_weights), self.rlwe.t)
+        poly_weights = Rq(np.array(flattened_weights.cpu()), self.rlwe.t)
 
         # Encrypt the polynomial
         c0, c1 = self.rlwe.encrypt(poly_weights, self.aggregated_public_key)
         c0 = list(c0.poly.coeffs)
         c1 = list(c1.poly.coeffs)
-        print(f"client {self.id} c0 (first 10): {c0[:10]}")
-        print(f"client {self.id} c1 (first 10): {c1[:10]}")
+        # print(f"client {self.id} c0 (first 10): {c0[:10]}")
+        # print(f"client {self.id} c1 (first 10): {c1[:10]}")
         return c0, c1
 
 
