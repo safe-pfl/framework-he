@@ -149,8 +149,8 @@ class Server(FederatedBase):
     def aggregate_clusterwise(self, client_clusters, use_encryption):
 
         for cluster_idx, cluster in enumerate(client_clusters):
-            if len(cluster) == 1:
-                continue
+            # if len(cluster) == 1:
+            #     continue
 
             idcs = [client.id for client in cluster]
             self.log.info(f"Aggregating clients: {idcs}")

@@ -97,8 +97,7 @@ def main(config_yaml_path: str = "./config.yaml"):
     if config.ENCRYPTION_METHOD is not None:
         log.info("----------    encryption initialization --------------------------------------------------")
         if config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
-            config.RUNTIME_COMFIG.rlwe = rlwe_generator(model=initial_model,config=config, log=log),
-
+            config.RUNTIME_COMFIG.rlwe = rlwe_generator(model=initial_model,config=config, log=log)
 
 
     log.info("----------    client initialization --------------------------------------------------")
@@ -124,7 +123,6 @@ def main(config_yaml_path: str = "./config.yaml"):
     log.info("----------    server initialization --------------------------------------------------")
     server = Server(initial_model, config, log)
 
-
     if config.ENCRYPTION_METHOD is not None and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
         log.info("----------    generating sever vector a   --------------------------------------------------")
         if server.rlwe_vector_a_poly is None:
@@ -142,8 +140,6 @@ def main(config_yaml_path: str = "./config.yaml"):
         for client in clients:
             _stored_aggregated_key = client.store_aggregated_pubkey(aggregated_public_key)
             assert _stored_aggregated_key == True
-
-
 
     log.info("----------    Federated Learning initialization --------------------------------------------------")
     cfl_stats = ExperimentLogger()
@@ -210,8 +206,6 @@ def main(config_yaml_path: str = "./config.yaml"):
                 cluster_indices.append(np.where(clustering.labels_ == label)[0].tolist())
 
             client_clusters = update_clusters_based_on_indexes(clients=clients, cluster_indices=cluster_indices)
-
-
         elif (
                 c_round % config.CLUSTERING_PERIOD == 0
                 and config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING
@@ -236,11 +230,18 @@ def main(config_yaml_path: str = "./config.yaml"):
                     )
 
 
+        
+        if len(client_clusters) == 0:
+            log.warn(f'all clients are going to aggregate to each others in FL round: {c_round}')
+            server.aggregate_clusterwise(
+                client_clusters=[clients],    # passing the full list of clients.
+                use_encryption=config.ENCRYPTION_METHOD is not None and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS)
+        else:
+            log.info(f'triggering aggregation based on these indexes {cluster_indices} in FL round: {c_round}')
 
-        log.info(f'triggering aggregation based on these indexes {cluster_indices}')
-        server.aggregate_clusterwise(
-            client_clusters=client_clusters,
-            use_encryption=config.ENCRYPTION_METHOD is not None and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS)
+            server.aggregate_clusterwise(
+                client_clusters=client_clusters,
+                use_encryption=config.ENCRYPTION_METHOD is not None and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS)
 
         acc_clients = [client.evaluate() for client in clients]
 
