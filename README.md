@@ -4,38 +4,6 @@
 
 This repository contains the implementation of a privacy-preserving federated learning system using homomorphic encryption.
 
-## Requirements
-
-### Python Dependencies
-```bash
-# Core ML and Data Processing
-torch
-torchvision
-timm
-numpy
-scipy
-scikit-learn
-pandas
-matplotlib
-seaborn
-
-# Datasets
-datasets
-TinyImageNet
-
-# Utilities
-PyYAML
-tabulate
-tqdm
-typer
-lxml
-
-# Project-specific
-safe_pfl_utils
-breaching
-xmkckks
-```
-
 ## Setup
 
 1. Clone the repository:
@@ -86,7 +54,7 @@ python main.py --config-yaml-path ./config.yaml
 
 Alternatively, you can use the Jupyter notebook:
 ```bash
-jupyter notebook safe-pfl.ipynb
+jupyter notebook safe-pfl.ipynb # (just includes learning logic)
 ```
 
 ## Available Models
