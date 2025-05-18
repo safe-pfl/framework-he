@@ -176,6 +176,11 @@ def main(config_yaml_path: str = "./config.yaml"):
     CLUSTERING_LABELS = None
     STOP_CLUSTERING: bool = False
 
+    # Track previous cluster composition to detect changes
+    previous_cluster_composition = {}
+    # Track which clients already have keys for which clusters
+    client_cluster_keys = {client.id: set() for client in clients}
+
     for c_round in range(1, config.FEDERATED_LEARNING_ROUNDS + 1):
         if c_round == 1:
             for client in clients:
@@ -215,6 +220,9 @@ def main(config_yaml_path: str = "./config.yaml"):
                 f"done calculating optimal sensitivity percentage with value of {config.SENSITIVITY_PERCENTAGE}"
             )
 
+        # Flag to track if clustering has changed
+        clustering_changed = False
+
         if TRIGGER_CLUSTERING:
             full_similarities = server.compute_pairwise_similarities(clients=clients)
             log.warn(f"Global clustering triggered {c_round}")
@@ -236,6 +244,20 @@ def main(config_yaml_path: str = "./config.yaml"):
             client_clusters = update_clusters_based_on_indexes(
                 clients=clients, cluster_indices=cluster_indices
             )
+
+            # Check if clustering has changed
+            current_cluster_composition = {
+                i: sorted([client.id for client in cluster])
+                for i, cluster in enumerate(client_clusters)
+            }
+
+            if previous_cluster_composition != current_cluster_composition:
+                clustering_changed = True
+                log.info(f"Clustering has changed in round {c_round}")
+                previous_cluster_composition = current_cluster_composition
+                # Reset client key tracking when clusters change
+                client_cluster_keys = {client.id: set() for client in clients}
+
         elif (
             c_round % config.CLUSTERING_PERIOD == 0
             and config.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING
@@ -254,6 +276,19 @@ def main(config_yaml_path: str = "./config.yaml"):
                 clients=clients, cluster_indices=cluster_indices
             )
 
+            # Check if clustering has changed
+            current_cluster_composition = {
+                i: sorted([client.id for client in cluster])
+                for i, cluster in enumerate(client_clusters)
+            }
+
+            if previous_cluster_composition != current_cluster_composition:
+                clustering_changed = True
+                log.info(f"Clustering has changed in round {c_round}")
+                previous_cluster_composition = current_cluster_composition
+                # Reset client key tracking when clusters change
+                client_cluster_keys = {client.id: set() for client in clients}
+
             if config.SAVE_BEFORE_AGGREGATION_MODELS:
                 for client in clients:
                     torch.save(
@@ -266,37 +301,53 @@ def main(config_yaml_path: str = "./config.yaml"):
             )
             client_clusters = [clients]
 
+            # First round is always considered a change in clustering
+            if c_round == 1:
+                clustering_changed = True
+                previous_cluster_composition = {
+                    0: sorted([client.id for client in clients])
+                }
+
         if (
             config.ENCRYPTION_METHOD is not None
             and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS
         ):
-            log.info(
-                "----------    aggregating public keys    --------------------------------------------------"
-            )
-            for cluster_idx, cluster in enumerate(client_clusters):
-                # Generate cluster-specific RLWE vector
-                cluster_vector_a = server.get_cluster_rlwe_vector(cluster_idx)
-
-                # Generate and aggregate cluster-specific public keys
-                cluster_aggregated_public_key = None
-                for client in cluster:
-                    if cluster_aggregated_public_key is None:
-                        cluster_aggregated_public_key = client.generate_pubkey(
-                            vector_a=cluster_vector_a.poly_to_list(),
-                            cluster_idx=cluster_idx,
-                        )
-                    else:
-                        cluster_aggregated_public_key += client.generate_pubkey(
-                            vector_a=cluster_vector_a.poly_to_list(),
-                            cluster_idx=cluster_idx,
-                        )
-
-                # Store and distribute cluster's aggregated key
-                server.store_cluster_aggregated_pubkey(
-                    cluster_idx, cluster_aggregated_public_key
+            # Only regenerate keys if clustering has changed or it's the first round
+            if clustering_changed or c_round == 1:
+                log.info(
+                    "----------    aggregating public keys (clustering changed)    --------------------------------------------------"
                 )
-                for client in cluster:
-                    client.store_aggregated_pubkey(cluster_aggregated_public_key)
+                for cluster_idx, cluster in enumerate(client_clusters):
+                    # Generate cluster-specific RLWE vector
+                    cluster_vector_a = server.get_cluster_rlwe_vector(cluster_idx)
+
+                    # Generate and aggregate cluster-specific public keys
+                    cluster_aggregated_public_key = None
+                    for client in cluster:
+                        # Update tracking of which client has keys for which cluster
+                        client_cluster_keys[client.id].add(cluster_idx)
+
+                        if cluster_aggregated_public_key is None:
+                            cluster_aggregated_public_key = client.generate_pubkey(
+                                vector_a=cluster_vector_a.poly_to_list(),
+                                cluster_idx=cluster_idx,
+                            )
+                        else:
+                            cluster_aggregated_public_key += client.generate_pubkey(
+                                vector_a=cluster_vector_a.poly_to_list(),
+                                cluster_idx=cluster_idx,
+                            )
+
+                    # Store and distribute cluster's aggregated key
+                    server.store_cluster_aggregated_pubkey(
+                        cluster_idx, cluster_aggregated_public_key
+                    )
+                    for client in cluster:
+                        client.store_aggregated_pubkey(cluster_aggregated_public_key)
+            else:
+                log.info(
+                    "----------    using existing public keys (clustering unchanged)    --------------------------------------------------"
+                )
 
         log.info(
             f"triggering aggregation based on these indexes {cluster_indices} in FL round: {c_round}"

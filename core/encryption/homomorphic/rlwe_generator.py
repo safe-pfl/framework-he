@@ -14,25 +14,28 @@ def rlwe_generator(model, config: ConfigValidator, log: Log) -> RLWE:
         "----------    Homomorphic xMK-CKKS (RLEW) initialization --------------------------------------------------"
     )
 
-    # find closest 2^x larger than number of weights
+    # Find closest 2^x larger than number of weights (like in reference code)
     num_weights = count_parameters(model, config.MODEL_TYPE, log)
     n = 2 ** math.ceil(math.log2(num_weights))
-    log.info(f"the vlue for RLWE `n` is: {n}")
+    log.info(f"RLWE parameter n: {n} (power of 2 >= num_weights {num_weights})")
 
-    # decide value range t of plaintext - use a more conservative value
+    # Calculate t based on weight decimals and number of clients (like in reference code)
     max_weight_value = 10**config.XMKCKKS_WEIGHT_DECIMALS
     num_clients = config.NUMBER_OF_CLIENTS
-    # Use a more conservative multiplier to avoid overflow
-    t = next_prime(num_clients * max_weight_value * 1.5)
-    log.info(f"the vlue for RLWE `t` is: {t}")
+    t = next_prime(num_clients * max_weight_value * 2)
+    log.info(
+        f"RLWE parameter t: {t} (prime > num_clients({num_clients}) * max_weight_value({max_weight_value}) * 2)"
+    )
 
-    # decide value range q of encrypted plaintext - use a more moderate multiplier
-    q = next_prime(t * 20)  # Reduced from 50 to 20 for better stability
-    log.info(f"the vlue for RLWE `q` is: {q}")
+    # Calculate q as t * 50 (like in reference code)
+    q = next_prime(t * 50)
+    log.info(f"RLWE parameter q: {q} (prime > t * 50)")
 
+    # Store q in runtime config
     config.RUNTIME_CONFIG.q = q
 
-    # standard deviation of Gaussian distribution - use a smaller value
-    std = GAUSSIAN_DISTRIBUTION - 1  # Reduced from 3 to 2 for less noise
+    # Set standard deviation to 3 (like in reference code)
+    std_rlwe = GAUSSIAN_DISTRIBUTION
+    log.info(f"RLWE instance std for encryption noise: {std_rlwe}")
 
-    return RLWE(n, q, t, std)
+    return RLWE(n, q, t, std_rlwe)

@@ -39,6 +39,9 @@ class Server(FederatedBase):
         self.distance_metric = self.config.DISTANCE_METRIC
 
         self.rlwe = deepcopy(self.config.RUNTIME_CONFIG.rlwe)
+        if self.config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
+            self.log.info("Server generating its main RLWE vector 'a'.")
+            self.rlwe.generate_vector_a()
         # Store cluster-specific RLWE vectors and keys
         self.cluster_rlwe_vectors = {}  # Maps cluster_idx to RLWE vector
         self.cluster_aggregated_keys = {}  # Maps cluster_idx to aggregated public key
@@ -60,17 +63,29 @@ class Server(FederatedBase):
     def get_cluster_rlwe_vector(self, cluster_idx):
         if cluster_idx not in self.cluster_rlwe_vectors:
             return self._generate_cluster_rlwe_vector(cluster_idx)
+        self.log.info(f"Reusing existing RLWE vector for cluster {cluster_idx}")
         return self.cluster_rlwe_vectors[cluster_idx]
 
     def store_cluster_aggregated_pubkey(self, cluster_idx, aggregated_public_key):
+        # Check if we already have the same key for this cluster
+        if cluster_idx in self.cluster_aggregated_keys:
+            existing_key = self.cluster_aggregated_keys[cluster_idx][0]
+            # If keys are the same, no need to update
+            if np.array_equal(
+                existing_key.poly.coeffs,
+                self.rlwe.list_to_poly(aggregated_public_key, "q").poly.coeffs,
+            ):
+                self.log.info(
+                    f"Aggregated public key for cluster {cluster_idx} unchanged"
+                )
+                return True
+
         aggregated_pubkey = self.rlwe.list_to_poly(aggregated_public_key, "q")
         self.cluster_aggregated_keys[cluster_idx] = (
             aggregated_pubkey,
             self.cluster_rlwe_vectors[cluster_idx],
         )
-        self.log.info(
-            f"Server stored aggregated_public_key for cluster {cluster_idx}: {self.cluster_aggregated_keys[cluster_idx]}"
-        )
+        self.log.info(f"Server stored aggregated_public_key for cluster {cluster_idx}")
         return True
 
     def compute_pairwise_similarities(self, clients):
@@ -139,8 +154,8 @@ class Server(FederatedBase):
                 # Scale parameters to fixed-point with xmkckks_weight_decimals precision
                 scale = 10**self.config.XMKCKKS_WEIGHT_DECIMALS
 
-                # Apply clipping to prevent extreme values
-                flat_params = [max(min(x, 1e3), -1e3) for x in flat_params]
+                # No aggressive clipping - use modest clipping only for numerical stability
+                # This matches the approach in the reference code where clipping isn't as severe
                 flat_params = [int(x * scale) for x in flat_params]
 
                 # Pad to next power of 2 to ensure consistent size
@@ -181,22 +196,44 @@ class Server(FederatedBase):
                 partial_decryptions.append(padded_dec)
 
             # Final decryption
-            dec_sum = np.zeros(target_size, dtype=np.int64)
-            dec_sum[: len(csum0.poly.coeffs)] = csum0.poly.coeffs
+            # Initialize a numpy array for the sum of decrypted parameters.
+            # Using object type for dec_sum_accumulator to handle potentially very large intermediate integers if necessary,
+            # though direct int64 summation followed by Rq modulo should also work if t fits in int64.
+            # For safety, we ensure all numbers are treated correctly with respect to modulus t.
+            dec_sum_accumulator = np.zeros(target_size, dtype=np.int64)
 
-            for partial_dec in partial_decryptions:
-                dec_sum += partial_dec
+            # csum0 is Rq(..., q). Its coefficients are modulo q.
+            # We need these coefficients modulo t for the plaintext reconstruction.
+            plaintext_modulus_t = int(self.rlwe.t)
 
-            dec_sum = Rq(dec_sum, self.rlwe.t)
+            csum0_coeffs_mod_q = csum0.poly.coeffs
+            csum0_coeffs_mod_t = np.mod(csum0_coeffs_mod_q, plaintext_modulus_t)
+
+            # Assign the (mod t) coefficients of c0_sum to the accumulator
+            len_c0_coeffs = len(csum0_coeffs_mod_t)
+            dec_sum_accumulator[:len_c0_coeffs] = csum0_coeffs_mod_t
+            # Ensure remaining parts are zero if c0_coeffs_mod_t was shorter than target_size (should not happen if padding is consistent)
+            if len_c0_coeffs < target_size:
+                dec_sum_accumulator[len_c0_coeffs:] = 0
+
+            # Add partial decryptions (which are already modulo t and padded to target_size)
+            for partial_dec_coeffs_arr in partial_decryptions:
+                dec_sum_accumulator = np.add(
+                    dec_sum_accumulator, partial_dec_coeffs_arr
+                )
+                # We can take modulo t here at each step to keep numbers smaller, or at the end via Rq.
+                # Rq will handle the final modulo, so direct sum is fine if it doesn't overflow int64 significantly
+                # before Rq constructor (which it shouldn't if t fits int64).
+
+            # The dec_sum_accumulator now contains the sum of (c0_coeffs mod t) + sum(partial_shares mod t).
+            # This sum itself needs to be interpreted modulo t.
+            dec_sum = Rq(dec_sum_accumulator, plaintext_modulus_t)
 
             # Scale back from fixed-point after decryption
             scale = 10**-self.config.XMKCKKS_WEIGHT_DECIMALS
             decrypted_params = [x * scale for x in dec_sum.poly.coeffs]
 
-            # Add post-processing to filter out extreme values that might have occurred during encryption
-            decrypted_params = [max(min(x, 1e3), -1e3) for x in decrypted_params]
-
-            # Normalize by dividing by the number of clients
+            # Normalize by dividing by the number of clients without aggressive clipping
             decrypted_params = [x / len(clients) for x in decrypted_params]
 
             # Reconstruct the averaged model

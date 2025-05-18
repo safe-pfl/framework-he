@@ -47,17 +47,32 @@ class Client(FederatedBase):
         self.aggregated_public_key = None
         self.current_cluster_idx = None
 
+        # Store keys for each cluster to avoid regenerating them
+        self.cluster_keys = {}  # Maps cluster_idx to (secret_key, public_key) tuple
+
         self.log.info(f"client no: {self.id} initialized")
 
     # Step 1) Server sends shared vector_a to clients and they all send back vector_b
     def generate_pubkey(
         self, vector_a: List[int], cluster_idx: int = None
     ) -> List[int]:
+        # Check if we already have keys for this cluster
+        if cluster_idx in self.cluster_keys:
+            self.secret_key, self.public_key = self.cluster_keys[cluster_idx]
+            self.current_cluster_idx = cluster_idx
+            self.log.info(
+                f"client id: {self.id} reusing existing public key for cluster {cluster_idx}"
+            )
+            return self.public_key[0].poly_to_list()
+
         vector_a = self.rlwe.list_to_poly(vector_a, "q")
         self.rlwe.set_vector_a(vector_a)
 
         (self.secret_key, self.public_key) = self.rlwe.generate_keys()
         self.current_cluster_idx = cluster_idx
+
+        # Store the keys for this cluster
+        self.cluster_keys[cluster_idx] = (self.secret_key, self.public_key)
 
         self.log.info(
             f"client id: {self.id} generated public key for cluster {cluster_idx}"
@@ -112,14 +127,14 @@ class Client(FederatedBase):
         if self.secret_key is None:
             raise ValueError(f"Client {self.id} has no secret key for decryption")
 
-        # Use a smaller variance for error to reduce noise
-        std = GAUSSIAN_DISTRIBUTION  # Using the updated value from constants
+        # Use the same std as in RLWE initialization (3)
+        std = 3
         csum1_poly = self.rlwe.list_to_poly(csum1, "q")
 
         # Generate error with controlled magnitude
         error_array = np.random.randn(self.rlwe.n)
         # Clip extreme values in the error
-        error_array = np.clip(error_array, -3, 3) * std
+        error_array = np.clip(error_array, -2, 2) * std
 
         error = Rq(np.round(error_array), self.config.RUNTIME_CONFIG.q)
         decryption_share = self.rlwe.decrypt(csum1_poly, self.secret_key, error)
