@@ -106,7 +106,7 @@ def main(config_yaml_path: str = "./config.yaml"):
     )
     clients_id_list = client_ids_list_generator(config.NUMBER_OF_CLIENTS, log=log)
 
-    config.RUNTIME_COMFIG = RuntimeConfig(
+    config.RUNTIME_CONFIG = RuntimeConfig(
         clients_id_list=clients_id_list, rlwe=None, q=None, log=log
     )
 
@@ -124,7 +124,7 @@ def main(config_yaml_path: str = "./config.yaml"):
             "----------    encryption initialization --------------------------------------------------"
         )
         if config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS:
-            config.RUNTIME_COMFIG.rlwe = rlwe_generator(
+            config.RUNTIME_CONFIG.rlwe = rlwe_generator(
                 model=initial_model, config=config, log=log
             )
 
@@ -266,34 +266,37 @@ def main(config_yaml_path: str = "./config.yaml"):
             )
             client_clusters = [clients]
 
-        log.info(
-            "----------    aggregating public keys    --------------------------------------------------"
-        )
-        for cluster_idx, cluster in enumerate(client_clusters):
-            # Generate cluster-specific RLWE vector
-            cluster_vector_a = server.get_cluster_rlwe_vector(cluster_idx)
-
-            # Generate and aggregate cluster-specific public keys
-            cluster_aggregated_public_key = None
-            for client in cluster:
-                if cluster_aggregated_public_key is None:
-                    cluster_aggregated_public_key = client.generate_pubkey(
-                        vector_a=cluster_vector_a.poly_to_list(),
-                        cluster_idx=cluster_idx,
-                    )
-                else:
-                    cluster_aggregated_public_key += client.generate_pubkey(
-                        vector_a=cluster_vector_a.poly_to_list(),
-                        cluster_idx=cluster_idx,
-                    )
-
-            # Store and distribute cluster's aggregated key
-            server.store_cluster_aggregated_pubkey(
-                cluster_idx, cluster_aggregated_public_key
+        if (
+            config.ENCRYPTION_METHOD is not None
+            and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS
+        ):
+            log.info(
+                "----------    aggregating public keys    --------------------------------------------------"
             )
-            for client in cluster:
-                client.store_aggregated_pubkey(cluster_aggregated_public_key)
-                # server.store_aggregated_pubkey(cluster_aggregated_public_key)
+            for cluster_idx, cluster in enumerate(client_clusters):
+                # Generate cluster-specific RLWE vector
+                cluster_vector_a = server.get_cluster_rlwe_vector(cluster_idx)
+
+                # Generate and aggregate cluster-specific public keys
+                cluster_aggregated_public_key = None
+                for client in cluster:
+                    if cluster_aggregated_public_key is None:
+                        cluster_aggregated_public_key = client.generate_pubkey(
+                            vector_a=cluster_vector_a.poly_to_list(),
+                            cluster_idx=cluster_idx,
+                        )
+                    else:
+                        cluster_aggregated_public_key += client.generate_pubkey(
+                            vector_a=cluster_vector_a.poly_to_list(),
+                            cluster_idx=cluster_idx,
+                        )
+
+                # Store and distribute cluster's aggregated key
+                server.store_cluster_aggregated_pubkey(
+                    cluster_idx, cluster_aggregated_public_key
+                )
+                for client in cluster:
+                    client.store_aggregated_pubkey(cluster_aggregated_public_key)
 
         log.info(
             f"triggering aggregation based on these indexes {cluster_indices} in FL round: {c_round}"

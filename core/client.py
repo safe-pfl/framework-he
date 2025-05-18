@@ -38,7 +38,7 @@ class Client(FederatedBase):
         self.gradients = {}
         self.id = id_num
 
-        self.rlwe = deepcopy(self.config.RUNTIME_COMFIG.rlwe)
+        self.rlwe = deepcopy(self.config.RUNTIME_CONFIG.rlwe)
         self.public_key = None
         self.secret_key = None
         self.aggregated_public_key = None
@@ -105,13 +105,15 @@ class Client(FederatedBase):
         return c0, c1
 
     # Step 4) Use csum1 to calculate partial decryption share di
-    def compute_decryption_share(self, csum1, n, q) -> List[int]:
+    def compute_decryption_share(self, csum1) -> List[int]:
         if self.secret_key is None:
             raise ValueError(f"Client {self.id} has no secret key for decryption")
 
-        std = GAUSSIAN_DISTRIBUTION + 2  # Larger variance for security
+        std = GAUSSIAN_DISTRIBUTION + 2  # Larger variance for security & error coverage
         csum1_poly = self.rlwe.list_to_poly(csum1, "q")
-        error = Rq(np.round(std * np.random.randn(n)), q)
+        error = Rq(
+            np.round(std * np.random.randn(self.rlwe.n)), self.config.RUNTIME_CONFIG.q
+        )
         decryption_share = self.rlwe.decrypt(csum1_poly, self.secret_key, error)
         decryption_share = list(
             decryption_share.poly.coeffs

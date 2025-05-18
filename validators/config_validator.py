@@ -3,15 +3,26 @@ from typing import Tuple, List
 
 from torch.utils.data import DataLoader
 
-from constants.client_roles_constants import TRAIN, TEST, EVAL, TRAIN_TEST, TRAIN_EVAL, TEST_EVAL, TRAIN_TEST_EVAL
+from constants.client_roles_constants import (
+    TRAIN,
+    TEST,
+    EVAL,
+    TRAIN_TEST,
+    TRAIN_EVAL,
+    TEST_EVAL,
+    TRAIN_TEST_EVAL,
+)
 
 from constants.distances_constants import (
     DISTANCE_COORDINATE,
     DISTANCE_COSINE,
     DISTANCE_EUCLIDEAN,
 )
-from constants.federated_learning_schema_constants import TRADITIONAL_FEDERATED_LEARNING, CLUSTER_FEDERATED_LEARNING, \
-    DECENTRALIZED_FEDERATED_LEARNING
+from constants.federated_learning_schema_constants import (
+    TRADITIONAL_FEDERATED_LEARNING,
+    CLUSTER_FEDERATED_LEARNING,
+    DECENTRALIZED_FEDERATED_LEARNING,
+)
 from constants.framework import ENCRYPTION_HOMOMORPHIC_XMKCKKS
 
 from constants.models_constants import (
@@ -21,7 +32,8 @@ from constants.models_constants import (
     MODEL_MOBILENET,
     MODEL_VGG,
     MODEL_VIT,
-    MODEL_SWIN, MODEL_LENET
+    MODEL_SWIN,
+    MODEL_LENET,
 )
 
 from constants.aggregation_strategy_constants import (
@@ -35,7 +47,7 @@ from constants.datasets_constants import (
     DATA_SET_CIFAR_100,
     DATA_SET_FMNIST,
     DATA_SET_SVHN,
-    DATA_SET_TINY_IMAGE_NET
+    DATA_SET_TINY_IMAGE_NET,
 )
 
 from constants.data_distribution_constants import (
@@ -51,44 +63,43 @@ from validators.runtime_config import RuntimeConfig
 
 class ConfigValidator:
     def __init__(
-            self,
-            learning_rate: float,
-            model_type: str,
-            dataset_type: str,
-            data_distribution_kind: str,
-            distance_metric: str,
-            number_of_epochs=None,
-            sensitivity_percentage=None,
-            dynamic_sensitivity_percentage: bool = True,
-            train_batch_size=None,
-            test_batch_size=None,
-            transform_input_size=None,
-            weight_decay=1e-4,
-            number_of_clients=10,
-            dirichlet_beta=0.1,
-            save_before_aggregation_models: bool = False,
-            save_global_models: bool = False,
-            do_cluster: bool = True,
-            clustering_period=6,
-            federated_learning_rounds=6,
-            desired_distribution=None,
-            remove_common_ids: bool = False,
-            gpu_index: int | None = None,
-            device: str = None,
-            fed_avg: bool = False,
-            stop_avg_accuracy=None,
-            pre_computed_data_driven_clustering: bool = False,
-            distance_metric_on_parameters: bool = True,
-            pretrained_models: bool = False,
-            federated_learning_schema: str = None,
-            client_role: str = None,
-            client_sampling_rate: float = 1.0,
-            aggregation_strategy: str = None,
-            aggregation_sample_scaling: bool = False,
-            federation_id: str = "",
-            encryption_method: str = None,
-            xmkckks_weight_decimals: int = None,
-
+        self,
+        learning_rate: float,
+        model_type: str,
+        dataset_type: str,
+        data_distribution_kind: str,
+        distance_metric: str,
+        number_of_epochs=None,
+        sensitivity_percentage=None,
+        dynamic_sensitivity_percentage: bool = True,
+        train_batch_size=None,
+        test_batch_size=None,
+        transform_input_size=None,
+        weight_decay=1e-4,
+        number_of_clients=10,
+        dirichlet_beta=0.1,
+        save_before_aggregation_models: bool = False,
+        save_global_models: bool = False,
+        do_cluster: bool = True,
+        clustering_period=6,
+        federated_learning_rounds=6,
+        desired_distribution=None,
+        remove_common_ids: bool = False,
+        gpu_index: int | None = None,
+        device: str = None,
+        fed_avg: bool = False,
+        stop_avg_accuracy=None,
+        pre_computed_data_driven_clustering: bool = False,
+        distance_metric_on_parameters: bool = True,
+        pretrained_models: bool = False,
+        federated_learning_schema: str = None,
+        client_role: str = None,
+        client_sampling_rate: float = 1.0,
+        aggregation_strategy: str = None,
+        aggregation_sample_scaling: bool = False,
+        federation_id: str = "",
+        encryption_method: str = None,
+        xmkckks_weight_decimals: int = None,
     ):
 
         self._RUNTIME_COMFIG: RuntimeConfig | None = None
@@ -96,12 +107,15 @@ class ConfigValidator:
         self.LEARNING_RATE = learning_rate
         self.MODEL_TYPE = self._validate_model_type(model_type)
         self.DATASET_TYPE = self._validate_dataset_type(dataset_type)
-        self.DATA_DISTRIBUTION = self._validate_data_distribution(data_distribution_kind, desired_distribution)
+        self.DATA_DISTRIBUTION = self._validate_data_distribution(
+            data_distribution_kind, desired_distribution
+        )
         self.DISTANCE_METRIC = self._set_distance_metric(distance_metric)
         self.NUMBER_OF_EPOCHS = self._set_number_of_epochs(number_of_epochs)
         self.DYNAMIC_SENSITIVITY_PERCENTAGE = dynamic_sensitivity_percentage
-        self.SENSITIVITY_PERCENTAGE = self._set_sensitivity_percentage(sensitivity_percentage,
-                                                                       dynamic_sensitivity_percentage)
+        self.SENSITIVITY_PERCENTAGE = self._set_sensitivity_percentage(
+            sensitivity_percentage, dynamic_sensitivity_percentage
+        )
 
         self.TRAIN_BATCH_SIZE, self.TEST_BATCH_SIZE, self.TRANSFORM_INPUT_SIZE = (
             self._set_transformer(
@@ -129,7 +143,9 @@ class ConfigValidator:
         self.PRE_COMPUTED_DATA_DRIVEN_CLUSTERING = pre_computed_data_driven_clustering
         self.DISTANCE_METRIC_ON_PARAMETERS = distance_metric_on_parameters
         self.PRETRAINED_MODELS = pretrained_models
-        self.FEDERATED_LEARNING_SCHEMA = self._federated_learning_schema(federated_learning_schema)
+        self.FEDERATED_LEARNING_SCHEMA = self._federated_learning_schema(
+            federated_learning_schema
+        )
         self.CLIENT_ROLE = self._client_role(client_role)
         self.CLIENT_SAMPLING_RATE = client_sampling_rate
         self.AGGREGATION_STRATEGY = self._aggregation_strategy(aggregation_strategy)
@@ -178,11 +194,11 @@ class ConfigValidator:
     #     return config_dic
 
     @property
-    def RUNTIME_COMFIG(self) -> RuntimeConfig:
+    def RUNTIME_CONFIG(self) -> RuntimeConfig:
         return self._RUNTIME_COMFIG
 
-    @RUNTIME_COMFIG.setter
-    def RUNTIME_COMFIG(self, runtime_config: RuntimeConfig) -> None:
+    @RUNTIME_CONFIG.setter
+    def RUNTIME_CONFIG(self, runtime_config: RuntimeConfig) -> None:
         self._RUNTIME_COMFIG: RuntimeConfig = runtime_config
 
     def _validate_model_type(self, model_type: str) -> str:
@@ -207,7 +223,7 @@ class ConfigValidator:
             DATA_SET_CIFAR_100,
             DATA_SET_FMNIST,
             DATA_SET_SVHN,
-            DATA_SET_TINY_IMAGE_NET
+            DATA_SET_TINY_IMAGE_NET,
         ]:
             raise TypeError(f"unsupported dataset type, {dataset_type}")
 
@@ -221,10 +237,14 @@ class ConfigValidator:
         else:
             return 10
 
-    def _validate_data_distribution(self, data_distribution_kind: str, desired_distribution: str) -> str:
+    def _validate_data_distribution(
+        self, data_distribution_kind: str, desired_distribution: str
+    ) -> str:
         if data_distribution_kind == DATA_DISTRIBUTION_FIX:
             if desired_distribution is None:
-                raise TypeError(f"desired_distribution is None while the data_distribution_kind is fix")
+                raise TypeError(
+                    f"desired_distribution is None while the data_distribution_kind is fix"
+                )
 
             return "noniid-fix"
 
@@ -246,7 +266,9 @@ class ConfigValidator:
         elif data_distribution_kind == DATA_DISTRIBUTION_DIR:
             return "noniid-labeldir"
         else:
-            raise TypeError(f"unsupported data distribution data distribution of, {data_distribution_kind}")
+            raise TypeError(
+                f"unsupported data distribution data distribution of, {data_distribution_kind}"
+            )
 
     def _set_distance_metric(self, metric: str) -> str:
         if metric not in [
@@ -273,7 +295,9 @@ class ConfigValidator:
 
         return number_of_epochs
 
-    def _set_sensitivity_percentage(self, sensitivity_percentage, dynamic_sensitivity_percentage) -> int:
+    def _set_sensitivity_percentage(
+        self, sensitivity_percentage, dynamic_sensitivity_percentage
+    ) -> int:
 
         if dynamic_sensitivity_percentage:
             print(
@@ -287,17 +311,19 @@ class ConfigValidator:
         return sensitivity_percentage
 
     def _set_transformer(
-            self,
-            train_batch_size: int | None,  # Use modern union type hint (Python 3.10+) or Optional[int]
-            test_batch_size: int | None,
-            transform_input_size: int | None,
+        self,
+        train_batch_size: (
+            int | None
+        ),  # Use modern union type hint (Python 3.10+) or Optional[int]
+        test_batch_size: int | None,
+        transform_input_size: int | None,
     ) -> Tuple[int, int, int]:  # Correct type hint syntax
 
         # If user provided all values, use them directly
         if (
-                train_batch_size is not None
-                and test_batch_size is not None
-                and transform_input_size is not None
+            train_batch_size is not None
+            and test_batch_size is not None
+            and transform_input_size is not None
         ):
             return train_batch_size, test_batch_size, transform_input_size
 
@@ -323,9 +349,17 @@ class ConfigValidator:
             default_test_batch = 64
             default_input_size = 224
 
-        final_train_batch_size = train_batch_size if train_batch_size is not None else default_train_batch
-        final_test_batch_size = test_batch_size if test_batch_size is not None else default_test_batch
-        final_transform_input_size = transform_input_size if transform_input_size is not None else default_input_size
+        final_train_batch_size = (
+            train_batch_size if train_batch_size is not None else default_train_batch
+        )
+        final_test_batch_size = (
+            test_batch_size if test_batch_size is not None else default_test_batch
+        )
+        final_transform_input_size = (
+            transform_input_size
+            if transform_input_size is not None
+            else default_input_size
+        )
 
         if train_batch_size is None:
             print(
@@ -358,18 +392,20 @@ class ConfigValidator:
 
         if gpus:
             print("Available GPUs:")
-            if device.type == 'cuda' and device.index is None:
+            if device.type == "cuda" and device.index is None:
                 allocated_index = 0
             else:
                 allocated_index = device.index
 
             for index, name in gpus:
-                if device.type == 'cuda' and index == allocated_index:
+                if device.type == "cuda" and index == allocated_index:
                     print(f"Index: {index}, Device: {name} (ALLOCATED)")
                 else:
                     print(f"Index: {index}, Device: {name} (UNALLOCATED)")
         else:
-            raise Exception(f"given device is {device} while there is no gpu available!")
+            raise Exception(
+                f"given device is {device} while there is no gpu available!"
+            )
 
         return device
 
@@ -384,7 +420,9 @@ class ConfigValidator:
             CLUSTER_FEDERATED_LEARNING,
             DECENTRALIZED_FEDERATED_LEARNING,
         ]:
-            raise TypeError(f"unknown federated_learning_schema type: {federated_learning_schema}")
+            raise TypeError(
+                f"unknown federated_learning_schema type: {federated_learning_schema}"
+            )
         return federated_learning_schema
 
     def _client_role(self, client_role: str):
@@ -405,12 +443,15 @@ class ConfigValidator:
             AGGREGATION_STRATEGY_FED_AVG,
             AGGREGATION_STRATEGY_FED_PROX,
         ]:
-            raise TypeError(f"unknown aggregation_strategy type: {aggregation_strategy}")
+            raise TypeError(
+                f"unknown aggregation_strategy type: {aggregation_strategy}"
+            )
         return aggregation_strategy
 
     def _encryption_method(self, encryption_method: str):
         if encryption_method not in [
             ENCRYPTION_HOMOMORPHIC_XMKCKKS,
+            None,
         ]:
             raise TypeError(f"unknown encryption_method type: {encryption_method}")
         return encryption_method

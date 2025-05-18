@@ -38,7 +38,7 @@ client_sampling_rate: 1.0
 pre_computed_data_driven_clustering: false
 do_cluster: true
 clustering_period: 6
-federated_learning_rounds: 10
+federated_learning_rounds: 80
 stop_avg_accuracy: 1.0
 save_before_aggregation_models: false
 save_global_models: false
@@ -46,4 +46,5 @@ save_global_models: false
 # Encryption
 # none | he_xmkckks | TODO: other encryption methods
 encryption_method: "he_xmkckks"
+# encryption_method: null
 xmkckks_weight_decimals: 8

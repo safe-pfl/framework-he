@@ -37,7 +37,7 @@ class Server(FederatedBase):
         self.model_cache = []
         self.distance_metric = self.config.DISTANCE_METRIC
 
-        self.rlwe = deepcopy(self.config.RUNTIME_COMFIG.rlwe)
+        self.rlwe = deepcopy(self.config.RUNTIME_CONFIG.rlwe)
         # Store cluster-specific RLWE vectors and keys
         self.cluster_rlwe_vectors = {}  # Maps cluster_idx to RLWE vector
         self.cluster_aggregated_keys = {}  # Maps cluster_idx to aggregated public key
@@ -132,25 +132,44 @@ class Server(FederatedBase):
                 encrypted_models.append(encrypted)
 
             # Aggregate encrypted models
-            csum0 = encrypted_models[0][0]
-            csum1 = encrypted_models[0][1]
+            csum0 = np.zeros(
+                self.rlwe.n, dtype=np.int64
+            )  # Initialize with correct size
+            csum1 = np.zeros(
+                self.rlwe.n, dtype=np.int64
+            )  # Initialize with correct size
+
+            # Add first model's coefficients
+            coeffs0 = encrypted_models[0][0].poly.coeffs
+            coeffs1 = encrypted_models[0][1].poly.coeffs
+            csum0[: len(coeffs0)] = coeffs0
+            csum1[: len(coeffs1)] = coeffs1
+
+            # Add remaining models' coefficients
             for i in range(1, len(encrypted_models)):
-                csum0 += encrypted_models[i][0]
-                csum1 += encrypted_models[i][1]
-            csum = (csum0, csum1)
+                coeffs0 = encrypted_models[i][0].poly.coeffs
+                coeffs1 = encrypted_models[i][1].poly.coeffs
+                csum0[: len(coeffs0)] += coeffs0
+                csum1[: len(coeffs1)] += coeffs1
+
+            # Convert back to polynomials
+            csum0 = Rq(csum0, self.config.RUNTIME_CONFIG.q)
+            csum1 = Rq(csum1, self.config.RUNTIME_CONFIG.q)
 
             # Partial decryption from each client
             partial_decryptions = []
-            for i, (sec, _) in enumerate(client_keys):
-                e_star = discrete_gaussian(
-                    self.rlwe.n, self.config.RUNTIME_COMFIG.q, GAUSSIAN_DISTRIBUTION + 2
-                )  # larger variance
-                partial_dec = self.rlwe.decrypt(csum1, sec, e_star)
-                partial_decryptions.append(partial_dec)
+            for client in clients:
+                partial_dec = client.compute_decryption_share(csum1.poly.coeffs)
+                # Pad partial decryption to full size
+                padded_dec = np.zeros(self.rlwe.n, dtype=np.int64)
+                padded_dec[: len(partial_dec)] = partial_dec
+                partial_decryptions.append(padded_dec)
 
             # Final decryption
-            dec_sum = csum0 + sum(partial_decryptions)
-            dec_sum = Rq(dec_sum.poly.coeffs, self.rlwe.t)
+            dec_sum = csum0.poly.coeffs
+            for partial_dec in partial_decryptions:
+                dec_sum += partial_dec
+            dec_sum = Rq(dec_sum, self.rlwe.t)
 
             # Reconstruct the averaged model
             avg_model = py_copy.deepcopy(models[0])
