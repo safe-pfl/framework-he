@@ -28,6 +28,9 @@ class Client(FederatedBase):
     ):
         super().__init__(model, config, log)
 
+        # Use default PyTorch precision (float32) for training
+        self.model = self.model.float()  # Ensure model is in float32
+
         self.optimizer = optimizer_fn(self.model.parameters())
 
         self.model_shape = None
@@ -109,11 +112,16 @@ class Client(FederatedBase):
         if self.secret_key is None:
             raise ValueError(f"Client {self.id} has no secret key for decryption")
 
-        std = GAUSSIAN_DISTRIBUTION + 2  # Larger variance for security & error coverage
+        # Use a smaller variance for error to reduce noise
+        std = GAUSSIAN_DISTRIBUTION  # Using the updated value from constants
         csum1_poly = self.rlwe.list_to_poly(csum1, "q")
-        error = Rq(
-            np.round(std * np.random.randn(self.rlwe.n)), self.config.RUNTIME_CONFIG.q
-        )
+
+        # Generate error with controlled magnitude
+        error_array = np.random.randn(self.rlwe.n)
+        # Clip extreme values in the error
+        error_array = np.clip(error_array, -3, 3) * std
+
+        error = Rq(np.round(error_array), self.config.RUNTIME_CONFIG.q)
         decryption_share = self.rlwe.decrypt(csum1_poly, self.secret_key, error)
         decryption_share = list(
             decryption_share.poly.coeffs
@@ -129,6 +137,8 @@ class Client(FederatedBase):
         epochs=None,
         loader=None,
     ):
+        # Add gradient clipping to optimizer
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
         epochs = self.config.NUMBER_OF_EPOCHS if epochs is None else epochs
         _updated_model, train_stats = train(

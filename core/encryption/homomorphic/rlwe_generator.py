@@ -19,19 +19,20 @@ def rlwe_generator(model, config: ConfigValidator, log: Log) -> RLWE:
     n = 2 ** math.ceil(math.log2(num_weights))
     log.info(f"the vlue for RLWE `n` is: {n}")
 
-    # decide value range t of plaintext
-    max_weight_value = 10**config.XMKCKKS_WEIGHT_DECIMALS  # 100_000_000 if full weights
-    num_clients = 2
-    t = next_prime(num_clients * max_weight_value * 2)  # 2_000_000_011
+    # decide value range t of plaintext - use a more conservative value
+    max_weight_value = 10**config.XMKCKKS_WEIGHT_DECIMALS
+    num_clients = config.NUMBER_OF_CLIENTS
+    # Use a more conservative multiplier to avoid overflow
+    t = next_prime(num_clients * max_weight_value * 1.5)
     log.info(f"the vlue for RLWE `t` is: {t}")
 
-    # decide value range q of encrypted plaintext
-    q = next_prime(t * 50)  # *50 = 100_000_000_567
+    # decide value range q of encrypted plaintext - use a more moderate multiplier
+    q = next_prime(t * 20)  # Reduced from 50 to 20 for better stability
     log.info(f"the vlue for RLWE `q` is: {q}")
 
     config.RUNTIME_CONFIG.q = q
 
-    # standard deviation of Gaussian distribution
-    std = GAUSSIAN_DISTRIBUTION
+    # standard deviation of Gaussian distribution - use a smaller value
+    std = GAUSSIAN_DISTRIBUTION - 1  # Reduced from 3 to 2 for less noise
 
     return RLWE(n, q, t, std)

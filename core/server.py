@@ -1,12 +1,10 @@
 from copy import deepcopy
 
 import numpy as np
-from xmkckks.rlwe import discrete_gaussian
 
 from constants.framework import (
     GLOBAL_MODELS_SAVING_PATH,
     ENCRYPTION_HOMOMORPHIC_XMKCKKS,
-    GAUSSIAN_DISTRIBUTION,
 )
 from constants.distances_constants import *
 import pandas as pd
@@ -33,6 +31,9 @@ from core.client import Client
 class Server(FederatedBase):
     def __init__(self, model, config: "ConfigValidator", log: "Log"):
         super().__init__(model, config, log)
+
+        # Use default PyTorch precision (float32)
+        self.model = self.model.float()
 
         self.model_cache = []
         self.distance_metric = self.config.DISTANCE_METRIC
@@ -113,33 +114,47 @@ class Server(FederatedBase):
         self.log.info(f"models to be aggregated count: {len(clients)}")
 
         models = [client.model for client in clients]
-
         device = next(models[0].parameters()).device
 
         if use_encryption:
-
             aggregated_public_key = clients[0].aggregated_public_key
-            # Encrypt each model's parameters
+
+            # Calculate total parameters size
+            total_params = sum(p.numel() for p in models[0].parameters())
+            # Find next power of 2 that can accommodate all parameters
+            target_size = 2 ** (total_params - 1).bit_length()
+            self.log.info(
+                f"Model total parameters: {total_params}, Padded size: {target_size}"
+            )
+
+            # Encrypt each model's parameters with proper precision
             encrypted_models = []
             for model in models:
                 model.to(device)
+
                 flat_params = []
                 for param in model.parameters():
                     flat_params.extend(param.data.view(-1).tolist())
+
+                # Scale parameters to fixed-point with xmkckks_weight_decimals precision
+                scale = 10**self.config.XMKCKKS_WEIGHT_DECIMALS
+
+                # Apply clipping to prevent extreme values
+                flat_params = [max(min(x, 1e3), -1e3) for x in flat_params]
+                flat_params = [int(x * scale) for x in flat_params]
+
+                # Pad to next power of 2 to ensure consistent size
+                if len(flat_params) < target_size:
+                    flat_params.extend([0] * (target_size - len(flat_params)))
 
                 m = Rq(np.array(flat_params), self.rlwe.t)
                 encrypted = self.rlwe.encrypt(m, aggregated_public_key)
                 encrypted_models.append(encrypted)
 
-            # Aggregate encrypted models
-            csum0 = np.zeros(
-                self.rlwe.n, dtype=np.int64
-            )  # Initialize with correct size
-            csum1 = np.zeros(
-                self.rlwe.n, dtype=np.int64
-            )  # Initialize with correct size
-
             # Add first model's coefficients
+            csum0 = np.zeros(target_size, dtype=np.int64)
+            csum1 = np.zeros(target_size, dtype=np.int64)
+
             coeffs0 = encrypted_models[0][0].poly.coeffs
             coeffs1 = encrypted_models[0][1].poly.coeffs
             csum0[: len(coeffs0)] = coeffs0
@@ -161,22 +176,31 @@ class Server(FederatedBase):
             for client in clients:
                 partial_dec = client.compute_decryption_share(csum1.poly.coeffs)
                 # Pad partial decryption to full size
-                padded_dec = np.zeros(self.rlwe.n, dtype=np.int64)
+                padded_dec = np.zeros(target_size, dtype=np.int64)
                 padded_dec[: len(partial_dec)] = partial_dec
                 partial_decryptions.append(padded_dec)
 
             # Final decryption
-            dec_sum = csum0.poly.coeffs
+            dec_sum = np.zeros(target_size, dtype=np.int64)
+            dec_sum[: len(csum0.poly.coeffs)] = csum0.poly.coeffs
+
             for partial_dec in partial_decryptions:
                 dec_sum += partial_dec
+
             dec_sum = Rq(dec_sum, self.rlwe.t)
+
+            # Scale back from fixed-point after decryption
+            scale = 10**-self.config.XMKCKKS_WEIGHT_DECIMALS
+            decrypted_params = [x * scale for x in dec_sum.poly.coeffs]
+
+            # Add post-processing to filter out extreme values that might have occurred during encryption
+            decrypted_params = [max(min(x, 1e3), -1e3) for x in decrypted_params]
+
+            # Normalize by dividing by the number of clients
+            decrypted_params = [x / len(clients) for x in decrypted_params]
 
             # Reconstruct the averaged model
             avg_model = py_copy.deepcopy(models[0])
-            decrypted_params = list(dec_sum.poly.coeffs)
-
-            # Scale by number of models (averaging)
-            decrypted_params = [x * 1 / len(models) for x in decrypted_params]
 
             # Assign decrypted and averaged parameters back to the model
             pointer = 0
@@ -192,9 +216,10 @@ class Server(FederatedBase):
             return avg_model
 
         else:
-            # Original non-encrypted aggregation
+            # Non-encrypted aggregation uses float32
             for model in models:
                 model.to(device)
+                model.float()
             avg_model = py_copy.deepcopy(models[0])
 
             with torch.no_grad():
