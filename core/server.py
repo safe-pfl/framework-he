@@ -132,8 +132,11 @@ class Server(FederatedBase):
                 encrypted_models.append(encrypted)
 
             # Aggregate encrypted models
-            csum0 = sum([enc[0] for enc in encrypted_models])
-            csum1 = sum([enc[1] for enc in encrypted_models])
+            csum0 = encrypted_models[0][0]
+            csum1 = encrypted_models[0][1]
+            for i in range(1, len(encrypted_models)):
+                csum0 += encrypted_models[i][0]
+                csum1 += encrypted_models[i][1]
             csum = (csum0, csum1)
 
             # Partial decryption from each client
