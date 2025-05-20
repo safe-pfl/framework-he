@@ -203,6 +203,18 @@ def main(config_yaml_path: str = "./config.yaml"):
                 be_ready_for_clustering=TRIGGER_CLUSTERING,
                 epochs=config.NUMBER_OF_EPOCHS,
             )
+            # If we're using encryption and this is a clustering round, ensure importance masks are created
+            if (
+                config.ENCRYPTION_METHOD is not None
+                and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS
+                and (TRIGGER_CLUSTERING or c_round == 1)
+            ):
+                # Create importance mask based on gradients if it doesn't exist yet
+                if client.importance_mask is None and client.gradients:
+                    client.importance_mask = client.create_importance_mask()
+                    log.info(
+                        f"Created importance mask for client {client.id} based on gradients"
+                    )
 
         """
             Calculating the optimal sensitivity value (P)
@@ -223,6 +235,9 @@ def main(config_yaml_path: str = "./config.yaml"):
         # Flag to track if clustering has changed
         clustering_changed = False
 
+        # Track current round in server for visualization purposes
+        server.current_round = c_round
+
         if TRIGGER_CLUSTERING:
             full_similarities = server.compute_pairwise_similarities(clients=clients)
             log.warn(f"Global clustering triggered {c_round}")
@@ -231,6 +246,22 @@ def main(config_yaml_path: str = "./config.yaml"):
 
             # cleaning the memory up
             del full_similarities
+
+            # Make sure importance masks are created based on the gradients before clearing them
+            if (
+                config.ENCRYPTION_METHOD is not None
+                and config.ENCRYPTION_METHOD == ENCRYPTION_HOMOMORPHIC_XMKCKKS
+            ):
+                for client in clients:
+                    if client.gradients and (
+                        client.importance_mask is None or c_round > 1
+                    ):
+                        client.importance_mask = client.create_importance_mask()
+                        log.info(
+                            f"Created/updated importance mask for client {client.id} during clustering"
+                        )
+
+            # Now clear the gradients to save memory
             for client in clients:
                 client.gradients = {}
 

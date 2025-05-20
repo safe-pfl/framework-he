@@ -13,6 +13,7 @@ import torch
 from typing import List
 from copy import deepcopy
 from utils.encryption.pad_to_power_of_2 import pad_to_power_of_2
+from heapq import nlargest
 
 
 class Client(FederatedBase):
@@ -46,6 +47,7 @@ class Client(FederatedBase):
         self.secret_key = None
         self.aggregated_public_key = None
         self.current_cluster_idx = None
+        self.importance_mask = None
 
         # Store keys for each cluster to avoid regenerating them
         self.cluster_keys = {}  # Maps cluster_idx to (secret_key, public_key) tuple
@@ -90,6 +92,40 @@ class Client(FederatedBase):
         )
         return True
 
+    def create_importance_mask(self) -> np.ndarray:
+        """
+        Creates a binary mask based on the sensitivity percentage and gradients.
+        The mask will have 1s for the most important parameters and 0s for the rest.
+        """
+        if not self.gradients:
+            self.log.warn(
+                "No gradients available for creating importance mask. Using all parameters."
+            )
+            # If no gradients available, use all parameters
+            total_params = sum(p.numel() for p in self.model.parameters())
+            return np.ones(total_params, dtype=np.int32)
+
+        # Calculate how many parameters to keep based on sensitivity percentage
+        total_params = len(self.gradients)
+        params_to_keep = int(
+            np.ceil(self.config.SENSITIVITY_PERCENTAGE * total_params / 100)
+        )
+
+        # Get the indices of the most important parameters
+        grads = self.gradients.items()
+        important_indices = [
+            k for k, _ in nlargest(params_to_keep, grads, key=lambda x: x[1])
+        ]
+
+        # Create binary mask
+        mask = np.zeros(total_params, dtype=np.int32)
+        mask[important_indices] = 1
+
+        self.log.info(
+            f"Created importance mask with {params_to_keep}/{total_params} parameters ({self.config.SENSITIVITY_PERCENTAGE}%)"
+        )
+        return mask
+
     # Step 3) After round, encrypt flat list of parameters into two lists (c0, c1)
     def encrypt_parameters(self) -> Tuple[List[int], List[int]]:
         if self.aggregated_public_key is None:
@@ -103,9 +139,42 @@ class Client(FederatedBase):
         )
         self.model_shape = [param.size() for param in self.model.parameters()]
 
+        # Create or update importance mask based on gradients if needed
+        if self.importance_mask is None or len(self.importance_mask) != len(
+            flat_weights
+        ):
+            self.importance_mask = self.create_importance_mask()
+            self.log.info(f"Created new importance mask for client {self.id}")
+
+        # Convert to numpy for easier manipulation
+        flat_weights_np = flat_weights.cpu().numpy()
+        total_params = len(flat_weights_np)
+
+        # Apply mask: only encrypt important parameters
+        masked_weights = np.zeros_like(flat_weights_np)
+
+        # If mask is shorter than weights (due to padding in previous steps), extend it
+        if len(self.importance_mask) < total_params:
+            extended_mask = np.zeros(total_params, dtype=np.int32)
+            extended_mask[: len(self.importance_mask)] = self.importance_mask
+            self.importance_mask = extended_mask
+
+        # Apply the mask - keep important parameters, zero out unimportant ones
+        important_indices = np.where(self.importance_mask == 1)[0]
+        masked_weights[important_indices] = flat_weights_np[important_indices]
+
+        # Convert back to torch tensor
+        masked_flat_weights = torch.tensor(masked_weights, device=flat_weights.device)
+
+        # Count how many parameters we're actually encrypting
+        important_count = np.sum(self.importance_mask)
+        self.log.info(
+            f"Client {self.id} encrypting {important_count}/{total_params} parameters ({important_count/total_params*100:.2f}%)"
+        )
+
         # Pad list until length 2**20 with random numbers that mimic the weights
         flattened_weights, self.model_size = pad_to_power_of_2(
-            flat_weights, self.rlwe.n, self.config.XMKCKKS_WEIGHT_DECIMALS
+            masked_flat_weights, self.rlwe.n, self.config.XMKCKKS_WEIGHT_DECIMALS
         )
         self.log.info(
             f"Client {self.id} encrypting parameters for cluster {self.current_cluster_idx}"
@@ -118,8 +187,6 @@ class Client(FederatedBase):
         c0, c1 = self.rlwe.encrypt(poly_weights, self.aggregated_public_key)
         c0 = list(c0.poly.coeffs)
         c1 = list(c1.poly.coeffs)
-        # print(f"client {self.id} c0 (first 10): {c0[:10]}")
-        # print(f"client {self.id} c1 (first 10): {c1[:10]}")
         return c0, c1
 
     # Step 4) Use csum1 to calculate partial decryption share di
@@ -156,52 +223,20 @@ class Client(FederatedBase):
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
         epochs = self.config.NUMBER_OF_EPOCHS if epochs is None else epochs
-        _updated_model, train_stats = train(
-            self.model,
-            self.train_loader if not loader else loader,
-            self.optimizer,
-            epochs,
-            self.device,
-            self.log,
-        )
 
-        self.model.load_state_dict(_updated_model.state_dict())
-        del _updated_model
-
-        self.log.info(
-            f"training done for client no {self.id} with loss of {train_stats}"
-        )
-
+        # If we need gradients for clustering, use the track_gradients option
         if be_ready_for_clustering:
-            criterion = torch.nn.CrossEntropyLoss().to(
-                device=self.device, non_blocking=True
+            _updated_model, train_stats, accumulated_grads = train(
+                self.model,
+                self.train_loader if not loader else loader,
+                self.optimizer,
+                epochs,
+                self.device,
+                self.log,
+                track_gradients=True,
             )
 
-            _model = py_copy.deepcopy(self.model)
-            _model.eval()
-
-            accumulated_grads = []
-            for param in _model.parameters():
-                if param.requires_grad:
-                    accumulated_grads.append(
-                        torch.zeros_like(param, device=self.device)
-                    )
-                else:
-                    accumulated_grads.append(None)
-
-            for inputs, labels in self.train_loader:
-                inputs, labels = inputs.to(self.device), labels.to(self.device)
-                outputs = _model(inputs)
-                loss = criterion(outputs, labels.long())
-
-                grads = torch.autograd.grad(
-                    loss, _model.parameters(), allow_unused=True
-                )
-
-                for i, grad in enumerate(grads):
-                    if grad is not None:
-                        accumulated_grads[i] += grad.detach().abs()
-
+            # Process the accumulated gradients
             all_grads = []
             for grad in accumulated_grads:
                 if grad is not None:
@@ -211,9 +246,29 @@ class Client(FederatedBase):
                 combined_grads = torch.cat(all_grads).numpy()
                 self.gradients = {i: val for i, val in enumerate(combined_grads)}
                 self.log.info(f"Gradients computed with {len(self.gradients)} entries.")
+
+                # Create importance mask based on these gradients
+                self.importance_mask = self.create_importance_mask()
+                self.log.info(f"Created importance mask for client {self.id}")
             else:
                 self.log.warn("No gradients were computed.")
                 self.gradients = {}
+        else:
+            _updated_model, train_stats = train(
+                self.model,
+                self.train_loader if not loader else loader,
+                self.optimizer,
+                epochs,
+                self.device,
+                self.log,
+                track_gradients=False,
+            )
 
-            del _model
+        self.model.load_state_dict(_updated_model.state_dict())
+        del _updated_model
+
+        self.log.info(
+            f"training done for client no {self.id} with loss of {train_stats}"
+        )
+
         return train_stats
