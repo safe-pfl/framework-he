@@ -1,16 +1,14 @@
 device: 'cuda'
 gpu_index: "0"
 
-federation_id: '1.x.y'
-# TraditionalFederatedLearning | ClusterFederatedLearningSchema
+federation_id: 'lenet_mnist'
 federated_learning_schema: 'TraditionalFederatedLearning'
-# train | test | eval | train-test-eval | train-eval | etc.
 client_role: 'train'
 
 learning_rate: 0.001
-model_type: "cnn"
+model_type: "LENET"
 pretrained_models: false
-dataset_type: "fmnist"
+dataset_type: "mnist"
 
 data_distribution_kind: "20"
 desired_distribution: null
@@ -22,29 +20,26 @@ sensitivity_percentage: 100
 remove_common_ids: false
 fed_avg: false
 
-# FedAvg | FedProx
 aggregation_strategy: "FedAvg"
 aggregation_sample_scaling: false
 
 distance_metric_on_parameters: true
-number_of_epochs: 1
-train_batch_size: 128
-test_batch_size: 256
+number_of_epochs: 2
+train_batch_size: 64
+test_batch_size: 128
 transform_input_size: 28
-weight_decay: null
+weight_decay: 1e-4
 
 number_of_clients: 10
 client_sampling_rate: 1.0
 pre_computed_data_driven_clustering: false
 do_cluster: true
-clustering_period: 6
-federated_learning_rounds: 80
-stop_avg_accuracy: 1.0
+clustering_period: 5
+federated_learning_rounds: 30
+stop_avg_accuracy: 0.95
 save_before_aggregation_models: false
 save_global_models: false
 
 # Encryption
-# none | he_xmkckks | TODO: other encryption methods
 encryption_method: "he_xmkckks"
-# encryption_method: null
-xmkckks_weight_decimals: 8
+xmkckks_weight_decimals: 8 
