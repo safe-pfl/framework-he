@@ -25,14 +25,14 @@ pip install -r requirements.txt
 
 ## Configuration
 
-The project uses a YAML configuration file (`config.yaml`) to set various parameters. Here's a comprehensive list of all available configuration options:
+The project uses a YAML configuration file (`config.yaml`) to set various parameters. Here's a comprehensive list of all available configuration options (italics are not important they are just for sack of documentation):
 
 ### Basic Settings
 - `device`: Computing device to use ('cuda' or 'cpu')
 - `gpu_index`: GPU device index to use (e.g., "0")
-- `federation_id`: Unique identifier for the federation
-- `federated_learning_schema`: Training schema (e.g., 'TraditionalFederatedLearning')
-- `client_role`: Role of the client (e.g., 'train')
+- `federation_id`: _Unique identifier for the federation_
+- `federated_learning_schema`: _Training schema (e.g., 'TraditionalFederatedLearning')_
+- `client_role`: _Role of the client (e.g., 'train')_
 
 ### Model and Training Parameters
 - `learning_rate`: Learning rate for model training (e.g., 0.001)
@@ -46,35 +46,35 @@ The project uses a YAML configuration file (`config.yaml`) to set various parame
 - `weight_decay`: Weight decay parameter for regularization
 
 ### Data Distribution
-- `data_distribution_kind`: Type of data distribution (e.g., "20")
+- `data_distribution_kind`: Type of data distribution (e.g., "20", "30" or "dir")
 - `desired_distribution`: Custom distribution settings (null for default)
 - `dirichlet_beta`: Beta parameter for Dirichlet distribution
 
 ### Federated Learning Settings
 - `number_of_clients`: Total number of federated learning clients
-- `client_sampling_rate`: Rate at which clients are sampled (0.0 to 1.0)
+- `client_sampling_rate`: _Rate at which clients are sampled (0.0 to 1.0)_
 - `federated_learning_rounds`: Number of federated learning rounds
 - `stop_avg_accuracy`: Target accuracy to stop training
 - `save_before_aggregation_models`: Whether to save models before aggregation
 - `save_global_models`: Whether to save global models
 
 ### Clustering and Aggregation
-- `do_cluster`: Whether to perform clustering (true/false)
+- `do_cluster`: _Whether to perform clustering (true/false)_
 - `clustering_period`: Period between clustering operations
 - `pre_computed_data_driven_clustering`: Whether to use pre-computed clustering
-- `aggregation_strategy`: Strategy for model aggregation (e.g., "FedAvg")
-- `aggregation_sample_scaling`: Whether to scale samples during aggregation
+- `aggregation_strategy`: _Strategy for model aggregation (e.g., "FedAvg")_
+- `aggregation_sample_scaling`: _Whether to scale samples during aggregation_
 
 ### Distance and Sensitivity
-- `distance_metric`: Metric for distance calculation (e.g., "coordinate")
+- `distance_metric`: Metric for distance calculation (e.g., "coordinate", "cosine", etc.)
 - `distance_metric_on_parameters`: Whether to calculate distance on parameters
 - `dynamic_sensitivity_percentage`: Whether to use dynamic sensitivity
 - `sensitivity_percentage`: Percentage for sensitivity calculation
 - `remove_common_ids`: Whether to remove common IDs
 
 ### Encryption
-- `encryption_method`: Method of encryption (e.g., "he_xmkckks")
-- `xmkckks_weight_decimals`: Number of decimal places for encrypted weights
+- `encryption_method`: Method of encryption (e.g., "he_xmkckks" or null)
+- `xmkckks_weight_decimals`: Number of decimal places for encrypted weights (originally 8)
 
 ## Running the Project
 
