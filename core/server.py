@@ -183,6 +183,7 @@ class Server(FederatedBase):
                 encrypted_models.append(encrypted)
 
             # Add first model's coefficients
+            self.log.info("Starting to add model coefficients")
             csum0 = np.zeros(target_size, dtype=np.int64)
             csum1 = np.zeros(target_size, dtype=np.int64)
 
@@ -190,28 +191,42 @@ class Server(FederatedBase):
             coeffs1 = encrypted_models[0][1].poly.coeffs
             csum0[: len(coeffs0)] = coeffs0
             csum1[: len(coeffs1)] = coeffs1
+            self.log.info("Added first model coefficients")
 
             # Add remaining models' coefficients
+            self.log.info(
+                f"Adding remaining {len(encrypted_models)-1} models' coefficients"
+            )
             for i in range(1, len(encrypted_models)):
                 coeffs0 = encrypted_models[i][0].poly.coeffs
                 coeffs1 = encrypted_models[i][1].poly.coeffs
                 csum0[: len(coeffs0)] += coeffs0
                 csum1[: len(coeffs1)] += coeffs1
+            self.log.info("Finished adding all model coefficients")
 
             # Convert back to polynomials
+            self.log.info("Starting conversion to Rq polynomials for csum0")
             csum0 = Rq(csum0, self.config.RUNTIME_CONFIG.q)
+            self.log.info("Finished conversion to Rq for csum0, starting csum1")
             csum1 = Rq(csum1, self.config.RUNTIME_CONFIG.q)
+            self.log.info("Finished conversion to Rq for csum1")
 
             # Partial decryption from each client
+            self.log.info("Starting partial decryption process from clients")
             partial_decryptions = []
-            for client in clients:
+            for client_idx, client in enumerate(clients):
+                self.log.info(
+                    f"Computing decryption share for client {client_idx}/{len(clients)}"
+                )
                 partial_dec = client.compute_decryption_share(csum1.poly.coeffs)
                 # Pad partial decryption to full size
                 padded_dec = np.zeros(target_size, dtype=np.int64)
                 padded_dec[: len(partial_dec)] = partial_dec
                 partial_decryptions.append(padded_dec)
+            self.log.info("Finished collecting all partial decryptions")
 
             # Final decryption
+            self.log.info("Starting final decryption process")
             # Initialize a numpy array for the sum of decrypted parameters.
             # Using object type for dec_sum_accumulator to handle potentially very large intermediate integers if necessary,
             # though direct int64 summation followed by Rq modulo should also work if t fits in int64.
@@ -222,10 +237,12 @@ class Server(FederatedBase):
             # We need these coefficients modulo t for the plaintext reconstruction.
             plaintext_modulus_t = int(self.rlwe.t)
 
+            self.log.info("Converting coefficients from modulo q to modulo t")
             csum0_coeffs_mod_q = csum0.poly.coeffs
             csum0_coeffs_mod_t = np.mod(csum0_coeffs_mod_q, plaintext_modulus_t)
 
             # Assign the (mod t) coefficients of c0_sum to the accumulator
+            self.log.info("Assigning coefficients to accumulator")
             len_c0_coeffs = len(csum0_coeffs_mod_t)
             dec_sum_accumulator[:len_c0_coeffs] = csum0_coeffs_mod_t
             # Ensure remaining parts are zero if c0_coeffs_mod_t was shorter than target_size (should not happen if padding is consistent)
@@ -233,7 +250,11 @@ class Server(FederatedBase):
                 dec_sum_accumulator[len_c0_coeffs:] = 0
 
             # Add partial decryptions (which are already modulo t and padded to target_size)
-            for partial_dec_coeffs_arr in partial_decryptions:
+            self.log.info("Adding partial decryptions to accumulator")
+            for dec_idx, partial_dec_coeffs_arr in enumerate(partial_decryptions):
+                self.log.info(
+                    f"Adding partial decryption {dec_idx+1}/{len(partial_decryptions)}"
+                )
                 dec_sum_accumulator = np.add(
                     dec_sum_accumulator, partial_dec_coeffs_arr
                 )
@@ -243,41 +264,72 @@ class Server(FederatedBase):
 
             # The dec_sum_accumulator now contains the sum of (c0_coeffs mod t) + sum(partial_shares mod t).
             # This sum itself needs to be interpreted modulo t.
+            self.log.info("Creating final Rq object from accumulator")
             dec_sum = Rq(dec_sum_accumulator, plaintext_modulus_t)
+            self.log.info("Finished creating final Rq object")
 
             # Scale back from fixed-point after decryption
+            self.log.info("Scaling back parameters from fixed-point representation")
             scale = 10**-self.config.XMKCKKS_WEIGHT_DECIMALS
             decrypted_params = [x * scale for x in dec_sum.poly.coeffs]
+            self.log.info("Finished scaling parameters")
 
             # Normalize by dividing by the number of clients without aggressive clipping
+            self.log.info("Normalizing encrypted parameters by client count")
             decrypted_params = [x / len(clients) for x in decrypted_params]
+            self.log.info("Finished encrypted parameter normalization")
 
             # For non-encrypted parameters, use standard averaging
+            self.log.info("Processing non-encrypted parameters")
             non_encrypted_params = np.zeros(total_params)
             if np.any(combined_mask == 0):  # If there are any non-encrypted parameters
                 non_encrypted_indices = np.where(combined_mask == 0)[0]
+                self.log.info(
+                    f"Found {len(non_encrypted_indices)} non-encrypted parameter indices"
+                )
 
-                # Average the non-encrypted parameters directly
+                # Vectorized approach for non-encrypted parameters
+                self.log.info("Using vectorized approach for non-encrypted parameters")
+
+                # First, flatten all models' parameters at once
+                all_flat_params = []
+                for model in models:
+                    # Flatten parameters for this model
+                    model_params = []
+                    for param in model.parameters():
+                        model_params.extend(param.data.view(-1).cpu().numpy())
+                    all_flat_params.append(model_params)
+
+                # Convert to numpy array for vectorized operations
+                all_flat_params = np.array(
+                    all_flat_params
+                )  # shape: [num_models, num_params]
+
+                # Calculate average directly for all non-encrypted parameters
+                # Sum across models (axis 0) and divide by number of models
+                non_encrypted_params_all = np.mean(all_flat_params, axis=0)
+
+                # Assign only the non-encrypted parameters
                 for idx in non_encrypted_indices:
-                    if idx < total_params:
-                        param_sum = 0.0
-                        for model in models:
-                            flat_model_params = []
-                            for param in model.parameters():
-                                flat_model_params.extend(
-                                    param.data.view(-1).cpu().numpy()
-                                )
-                            if idx < len(flat_model_params):
-                                param_sum += flat_model_params[idx]
-                        non_encrypted_params[idx] = param_sum / len(models)
+                    if idx < len(non_encrypted_params_all):
+                        non_encrypted_params[idx] = non_encrypted_params_all[idx]
+
+                self.log.info(
+                    "Finished vectorized processing of non-encrypted parameters"
+                )
+            self.log.info("Finished processing non-encrypted parameters")
 
             # Reconstruct the averaged model
+            self.log.info("Reconstructing averaged model")
             avg_model = py_copy.deepcopy(models[0])
 
             # Assign decrypted and averaged parameters back to the model
+            self.log.info("Assigning parameters to model")
             pointer = 0
             with torch.no_grad():
-                for param in avg_model.parameters():
+                for param_idx, param in enumerate(avg_model.parameters()):
+                    if param_idx % 10 == 0:
+                        self.log.info(f"Processing parameter layer {param_idx}")
                     param_size = param.numel()
                     # Get the relevant slice of parameters for this layer
                     param_slice = slice(pointer, pointer + param_size)
@@ -288,6 +340,9 @@ class Server(FederatedBase):
                     # Fill with encrypted parameters where mask is 1
                     encrypted_indices = np.where(combined_mask[param_slice] == 1)[0]
                     if len(encrypted_indices) > 0:
+                        self.log.info(
+                            f"Layer {param_idx}: Assigning {len(encrypted_indices)} encrypted parameters"
+                        )
                         for i, idx in enumerate(encrypted_indices):
                             if pointer + idx < len(decrypted_params):
                                 param_data[idx] = decrypted_params[pointer + idx]
@@ -295,6 +350,9 @@ class Server(FederatedBase):
                     # Fill with non-encrypted parameters where mask is 0
                     non_encrypted_indices = np.where(combined_mask[param_slice] == 0)[0]
                     if len(non_encrypted_indices) > 0:
+                        self.log.info(
+                            f"Layer {param_idx}: Assigning {len(non_encrypted_indices)} non-encrypted parameters"
+                        )
                         for idx in non_encrypted_indices:
                             param_data[idx] = non_encrypted_params[pointer + idx]
 
@@ -304,6 +362,7 @@ class Server(FederatedBase):
                     )
                     pointer += param_size
 
+            self.log.info("Finished model reconstruction. Aggregation complete.")
             return avg_model
 
         else:
@@ -609,21 +668,36 @@ class Server(FederatedBase):
 
             # Create a figure with subplots for each cluster and one for the combined mask
             fig, axs = plt.subplots(
-                num_clusters + 1, 1, figsize=(10, 2 * (num_clusters + 1))
+                num_clusters + 1, 1, figsize=(15, 3 * (num_clusters + 1))
             )
 
-            # Create a combined mask
-            combined_mask = np.zeros(mask_size, dtype=np.int32)
-            for mask in cluster_masks.values():
-                combined_mask = np.logical_or(combined_mask, mask)
+            # Define colors for each cluster
+            colors = [
+                "red",
+                "blue",
+                "green",
+                "purple",
+                "orange",
+                "brown",
+                "pink",
+                "gray",
+                "olive",
+                "cyan",
+            ]
+            cluster_colors = colors[:num_clusters]
+
+            # Create a custom colormap for the combined visualization
+            # 0: white (unimportant), 1-N: cluster colors
+            cmap_colors = ["white"] + cluster_colors
+            combined_cmap = ListedColormap(cmap_colors)
 
             # Plot each cluster's mask
             for i, (cluster_idx, mask) in enumerate(sorted(cluster_masks.items())):
                 # Sample the mask if needed
                 sampled_mask = mask[::sample_rate]
 
-                # Create a colormap: white for 0, blue for 1
-                cmap = ListedColormap(["white", "blue"])
+                # Create a colormap for this cluster: white for 0, cluster color for 1
+                cmap = ListedColormap(["white", cluster_colors[i]])
 
                 # Reshape for better visualization (make it 2D)
                 width = int(np.sqrt(len(sampled_mask)))
@@ -635,10 +709,22 @@ class Server(FederatedBase):
                 reshaped_mask = padded_mask.reshape(height, width)
 
                 # Plot
-                axs[i].imshow(reshaped_mask, cmap=cmap, aspect="auto")
-                axs[i].set_title(f"Cluster {cluster_idx} Importance Mask")
-                axs[i].set_xticks([])
-                axs[i].set_yticks([])
+                im = axs[i].imshow(reshaped_mask, cmap=cmap, aspect="auto")
+                axs[i].set_title(f"Cluster {cluster_idx} Importance Mask", pad=20)
+
+                # Add axis labels
+                axs[i].set_xlabel("Parameter Index (Sampled)", labelpad=10)
+                axs[i].set_ylabel("Layer Group", labelpad=10)
+
+                # Add grid lines for layers
+                axs[i].grid(True, linestyle="--", alpha=0.3)
+                axs[i].set_xticks(np.arange(0, width, width // 10))
+                axs[i].set_yticks(np.arange(0, height, height // 5))
+
+                # Add colorbar
+                cbar = plt.colorbar(im, ax=axs[i])
+                cbar.set_ticks([0, 1])
+                cbar.set_ticklabels(["Unimportant", "Important"])
 
                 # Add text showing percentage of important parameters
                 important_pct = np.sum(mask) / len(mask) * 100
@@ -651,7 +737,13 @@ class Server(FederatedBase):
                     bbox=dict(facecolor="white", alpha=0.7),
                 )
 
-            # Plot the combined mask
+            # Create combined mask with cluster-specific values
+            combined_mask = np.zeros(mask_size, dtype=np.int32)
+            for cluster_idx, mask in cluster_masks.items():
+                # Assign cluster-specific values (1-based for colormap)
+                combined_mask[mask == 1] = cluster_idx + 1
+
+            # Sample the combined mask
             sampled_combined = combined_mask[::sample_rate]
             width = int(np.sqrt(len(sampled_combined)))
             height = len(sampled_combined) // width + (
@@ -661,23 +753,53 @@ class Server(FederatedBase):
             padded_combined[: len(sampled_combined)] = sampled_combined
             reshaped_combined = padded_combined.reshape(height, width)
 
-            axs[-1].imshow(reshaped_combined, cmap=cmap, aspect="auto")
-            axs[-1].set_title("Combined Importance Mask")
-            axs[-1].set_xticks([])
-            axs[-1].set_yticks([])
+            # Plot the combined mask
+            im = axs[-1].imshow(reshaped_combined, cmap=combined_cmap, aspect="auto")
+            axs[-1].set_title("Combined Importance Mask Across All Clusters", pad=20)
 
-            # Add text showing percentage of important parameters in combined mask
-            combined_pct = np.sum(combined_mask) / len(combined_mask) * 100
+            # Add axis labels for combined plot
+            axs[-1].set_xlabel("Parameter Index (Sampled)", labelpad=10)
+            axs[-1].set_ylabel("Layer Group", labelpad=10)
+
+            # Add grid lines for layers in combined plot
+            axs[-1].grid(True, linestyle="--", alpha=0.3)
+            axs[-1].set_xticks(np.arange(0, width, width // 10))
+            axs[-1].set_yticks(np.arange(0, height, height // 5))
+
+            # Add legend for the combined plot
+            legend_elements = [
+                plt.Rectangle((0, 0), 1, 1, facecolor=color, edgecolor="black")
+                for color in cluster_colors
+            ]
+            axs[-1].legend(
+                legend_elements,
+                [f"Cluster {i}" for i in range(num_clusters)],
+                loc="upper right",
+                bbox_to_anchor=(1.15, 1),
+                title="Cluster Colors",
+            )
+
+            # Add text showing total percentage of important parameters
+            total_important = np.sum(combined_mask > 0) / len(combined_mask) * 100
             axs[-1].text(
                 0.02,
                 0.95,
-                f"{combined_pct:.2f}% important",
+                f"{total_important:.2f}% total important",
                 transform=axs[-1].transAxes,
                 color="black",
                 bbox=dict(facecolor="white", alpha=0.7),
             )
 
-            plt.tight_layout()
+            # Add a main title to the figure
+            fig.suptitle(
+                "Parameter Importance Distribution Across Clusters\n"
+                "White: Unimportant Parameters, Colored: Important Parameters",
+                y=0.98,
+                fontsize=14,
+            )
+
+            # Adjust layout to prevent title overlap
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
 
             # Save the figure if a path is provided
             if save_path is None:
@@ -688,7 +810,7 @@ class Server(FederatedBase):
                 os.path.dirname(save_path) if os.path.dirname(save_path) else ".",
                 exist_ok=True,
             )
-            plt.savefig(save_path)
+            plt.savefig(save_path, bbox_inches="tight", dpi=300)
             self.log.info(f"Saved cluster mask visualization to {save_path}")
 
             plt.close(fig)
